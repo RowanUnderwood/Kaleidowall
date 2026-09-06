@@ -25,6 +25,19 @@ int main(int argc, char** argv) {
     args.addOption({"library", "Index a folder on startup", "path"});
     args.addOption({"benchmark", "Profile repeatable playback and layout changes", "seconds"});
     args.addOption({"benchmark-fps", "Benchmark frame rate target", "fps", "60"});
+    args.addOption({"export", "Export a fresh sequence to an MP4 file and exit", "path"});
+    args.addOption({"export-seconds", "Export duration in seconds", "seconds", "60"});
+    args.addOption({"export-size", "Export height: 720, 1080 or 2160", "height", "1080"});
+    args.addOption({"export-fps", "Export frame rate: 30 or 60", "fps", "60"});
+    args.addOption({"export-quality", "Export quality: low, medium or high", "quality", "high"});
+    args.addOption({"export-audio", "Use an MP3/WAV soundtrack (trim/pad to export-seconds)", "path"});
+    args.addOption({"export-clip-audio", "Follow clip audio during export"});
+    args.addOption({"export-software", "Use CPU H.264 encoding instead of NVENC"});
+    args.addOption({"export-overwrite", "Replace the destination only after a successful export"});
+    args.addOption({"export-settings", "Applied session settings JSON for a reproducible export", "path"});
+    args.addOption({"export-seed", "Random seed for reproducible export", "seed", "42"});
+    args.addOption(
+        {"export-cancel-ms", "Cancel an export after this many milliseconds (validation)", "milliseconds"});
     args.process(app);
     auto data = args.value("data-dir");
     if (data.isEmpty())
@@ -34,6 +47,60 @@ int main(int argc, char** argv) {
     QJsonArray samples;
     QTimer sampleTimer;
     QTimer benchmarkEnd;
+    if (args.isSet("export")) {
+        if (args.isSet("smoke") || args.isSet("benchmark") ||
+            (args.isSet("export-audio") && args.isSet("export-clip-audio")))
+            args.showHelp(2);
+        if (args.isSet("export-settings")) {
+            QFile file(args.value("export-settings"));
+            if (!file.open(QIODevice::ReadOnly))
+                return 2;
+            QJsonParseError error;
+            const auto document = QJsonDocument::fromJson(file.readAll(), &error);
+            if (error.error != QJsonParseError::NoError || !document.isObject())
+                return 2;
+            window.canvas()->applySettings(kaleido::Settings::fromJson(document.object()));
+        }
+        kaleido::ExportOptions options;
+        options.destination = args.value("export");
+        options.duration = args.value("export-seconds").toDouble();
+        options.fps = args.value("export-fps").toInt();
+        const int height = args.value("export-size").toInt();
+        options.size = QSize(height == 720    ? 1280
+                             : height == 1080 ? 1920
+                             : height == 2160 ? 3840
+                                              : 0,
+                             height);
+        options.quality = QStringList{"low", "medium", "high"}.indexOf(args.value("export-quality"));
+        options.audioMode = args.isSet("export-audio") ? 2 : args.isSet("export-clip-audio") ? 1 : 0;
+        options.audioFile = args.value("export-audio");
+        options.volume = window.canvas()->settings().volume;
+        options.seed = args.value("export-seed").toUInt();
+        options.softwareEncoder = args.isSet("export-software");
+        options.overwrite = args.isSet("export-overwrite");
+        QObject::connect(&window, &kaleido::Window::exportFinished, &app,
+                         [&](bool success, bool canceled, const QString& message, QJsonObject report) {
+                             report["success"] = success;
+                             report["canceled"] = canceled;
+                             report["message"] = message;
+                             QFile out(data + "/export.json");
+                             if (out.open(QIODevice::WriteOnly))
+                                 out.write(QJsonDocument(report).toJson());
+                             window.grab().save(data + "/export-window.png");
+                             app.exit(success ? 0 : canceled ? 3 : 1);
+                         });
+        auto start = [&, options] {
+            window.startExport(options);
+            QTimer::singleShot(1500, &window, [&] { window.grab().save(data + "/export-preview.png"); });
+            if (args.isSet("export-cancel-ms"))
+                QTimer::singleShot(std::max(1, args.value("export-cancel-ms").toInt()), &window,
+                                   &kaleido::Window::cancelExport);
+        };
+        if (args.isSet("library"))
+            QObject::connect(window.library(), &kaleido::Library::scanFinished, &window, start);
+        else
+            QTimer::singleShot(500, &window, start);
+    }
     if (args.isSet("benchmark")) {
         kaleido::Settings s;
         s.minSlots = 2;

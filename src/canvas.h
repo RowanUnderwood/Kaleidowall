@@ -1,4 +1,5 @@
 #pragma once
+#include "compositor.h"
 #include "core.h"
 #include "library.h"
 #include "mpv_backend.h"
@@ -29,6 +30,9 @@ class Canvas : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
     void nextLayout();
     void nextClips();
     void nextAudio();
+    void setExportLocked(bool locked) {
+        exportLocked = locked;
+    }
     bool playing() const {
         return running;
     }
@@ -108,9 +112,9 @@ class Canvas : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
     double lastStats = 0, paintMs = 0, fpsMeasured = 0;
     int frames = 0, nextSerial = 1, audioSerial = -1, fromMask = 0, targetMask = 0;
     bool initialized = false, available = false, running = false, paused = false;
+    bool exportLocked = false;
     QString mode = "Grid", rendererName, lastError;
-    QOpenGLShaderProgram program;
-    GLuint vao = 0, vbo = 0;
+    Compositor compositor;
     bool profiling = false;
     QJsonArray profileEvents;
     double lastPaintAt = 0;

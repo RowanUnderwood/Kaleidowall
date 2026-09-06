@@ -53,7 +53,15 @@ Window::Window(const QString& dataDir) {
     QDir().mkpath(dataDir);
     media = new Library(dataDir + "/library.sqlite", this);
     player = new Canvas(media, this);
-    setCentralWidget(player);
+    canvasStack = new QStackedWidget;
+    canvasStack->addWidget(player);
+    exportPreview = new QLabel("Preparing export…");
+    exportPreview->setAlignment(Qt::AlignCenter);
+    exportPreview->setStyleSheet("background:#06080c;");
+    exportPreview->setMinimumSize(1, 1);
+    exportPreview->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+    canvasStack->addWidget(exportPreview);
+    setCentralWidget(canvasStack);
     setStyleSheet(R"(
         QMainWindow,QDialog{background:#0b1019;color:#e4ebf5;}
         QWidget{font-family:'Segoe UI';font-size:13px;color:#dce5f2;}
@@ -70,6 +78,8 @@ Window::Window(const QString& dataDir) {
         QPushButton:hover{background:#283b51;border-color:#5d819d;}
         QPushButton:pressed{background:#314b61;}
         QPushButton:disabled{color:#596980;border-color:#233044;}
+        QProgressBar{background:#0c131e;border:1px solid #304059;border-radius:6px;min-height:22px;text-align:center;color:#edf5ff;}
+        QProgressBar::chunk{background:#398d84;border-radius:5px;}
         QPushButton#primary{background:#69d4c5;border:0;color:#082b2a;font-weight:700;}
         QPushButton#primary:hover{background:#91e6dc;}
         QSpinBox,QDoubleSpinBox,QComboBox,QLineEdit{background:#0c131e;border:1px solid #2b3c53;border-radius:5px;padding:7px;min-height:19px;selection-background-color:#306f79;}
@@ -101,6 +111,11 @@ Window::Window(const QString& dataDir) {
         auto* b = button(names[i]);
         header->addWidget(b);
         connect(b, &QPushButton::clicked, this, [this, i] { showPanel(i); });
+        if (i == 0) {
+            auto* exportButton = button("Export");
+            header->addWidget(exportButton);
+            connect(exportButton, &QPushButton::clicked, this, &Window::showExportDialog);
+        }
     }
     auto* full = button("Fullscreen  F11");
     header->addWidget(full);
@@ -222,6 +237,16 @@ Window::Window(const QString& dataDir) {
 Window::~Window() {
     statsTimer.stop();
     hideTimer.stop();
+    exportPreviewTimer.stop();
+    if (exportWorker) {
+        disconnect(exportWorker, nullptr, this, nullptr);
+        exportWorker->cancel();
+        exportWorker->wait();
+        delete exportWorker;
+        exportWorker = nullptr;
+    }
+    delete exportSurface;
+    exportSurface = nullptr;
     delete takeCentralWidget();
     player = nullptr;
     delete media;
@@ -628,6 +653,12 @@ bool Window::eventFilter(QObject* watched, QEvent* event) {
     return QMainWindow::eventFilter(watched, event);
 }
 void Window::closeEvent(QCloseEvent* event) {
+    if (exportWorker) {
+        closeAfterExport = true;
+        cancelExport();
+        event->ignore();
+        return;
+    }
     media->cancelScan();
     player->stop();
     QMainWindow::closeEvent(event);

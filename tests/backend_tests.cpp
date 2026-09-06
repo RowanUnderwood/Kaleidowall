@@ -60,6 +60,40 @@ class BackendTests : public QObject {
         decoder.set("mute", "yes");
         QVERIFY(requestId != failedId);
     }
+    void acknowledgedMuteRefreshesDelayedObservation() {
+        MpvApi api;
+        api.set_property_async = &fakeSetProperty;
+        Decoder decoder(api);
+        int muted = 0;
+        mpv_event_property prop{"mute", MPV_FORMAT_FLAG, &muted};
+        mpv_event event{};
+        event.event_id = MPV_EVENT_PROPERTY_CHANGE;
+        event.data = &prop;
+        decoder.handleEvent(event);
+        decoder.set("mute", "yes");
+        QCOMPARE(decoder.string("mute"), QString("no"));
+        event = {};
+        event.event_id = MPV_EVENT_SET_PROPERTY_REPLY;
+        event.reply_userdata = requestId;
+        decoder.handleEvent(event);
+        QVERIFY(decoder.muteConfirmed);
+        QCOMPARE(decoder.string("mute"), QString("yes"));
+
+        decoder.set("mute", "no");
+        // An acknowledgment for the previous request cannot change the cache.
+        decoder.handleEvent(event);
+        QCOMPARE(decoder.string("mute"), QString("yes"));
+        event.reply_userdata = requestId;
+        event.error = MPV_ERROR_PROPERTY_ERROR;
+        decoder.handleEvent(event);
+        QCOMPARE(decoder.string("mute"), QString("yes"));
+        decoder.set("mute", "no");
+        event.reply_userdata = requestId;
+        event.error = 0;
+        decoder.handleEvent(event);
+        QCOMPARE(decoder.string("mute"), QString("no"));
+        QVERIFY(!decoder.muteConfirmed);
+    }
     void duplicateWritesAreNotQueuedEveryFrame() {
         MpvApi api;
         api.set_property_async = &fakeSetProperty;

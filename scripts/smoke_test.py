@@ -38,7 +38,7 @@ run_dir.mkdir()
 env = os.environ.copy()
 env['PATH'] = str(ROOT / '.deps/Qt/6.8.3/msvc2022_64/bin') + os.pathsep + env['PATH']
 with (run_dir / 'app.log').open('w') as log:
-    result = subprocess.run([str(ROOT / 'build/Release/Kaleidowall.exe'), '--data-dir',
+    result = subprocess.run([os.environ.get("KALEIDOWALL_EXE", str(ROOT / "build/Release/Kaleidowall.exe")), '--data-dir',
                              str(run_dir), '--library', str(MEDIA), '--smoke', '25'],
                             env=env, stdout=log, stderr=log, timeout=70)
 if result.returncode:

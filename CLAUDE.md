@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Kaleidowall: a native Windows video mosaic player (`Kaleidowall.exe`, C++ namespace `kaleido`). C++20 + Qt
 6.8 Widgets, one OpenGL 3.3 compositor surface, libmpv for decode, FFprobe for metadata, SQLite for the
-library. No browser runtime, no transcoding step. `README.md` documents user-facing behaviour and current scope limits; `PERFORMANCE.md`
+library. No browser runtime; direct-file playback plus offline MP4 export. `README.md` documents user-facing behaviour and current scope limits; `PERFORMANCE.md`
 records the transition-stall investigation and the measured before/after numbers.
 
 ## Commands
@@ -31,6 +31,8 @@ build\Release\kaleido_tests.exe -functions                   # list test functio
 python scripts/smoke_test.py                                 # real UI, generated multi-codec fixtures
 python scripts/orientation_test.py                           # vertical-flip regression, real player
 python scripts/benchmark.py --label local60 --fps 60         # transition/frame-pacing profile
+python scripts/export_test.py                              # real export, formats, audio, cancel, orientation
+python scripts/export_benchmark.py --seconds 12             # 1080p sources, 2/4/8 tiles, GPU telemetry
 ```
 
 The Python scripts need `ffmpeg`/`ffprobe` on PATH and a built `build/Release/Kaleidowall.exe`; they
@@ -90,7 +92,7 @@ that owns all playback) → `Decoder`/`MpvApi` (libmpv) and `Library` (SQLite + 
   deadlines (`nextTickAt`), so fractional intervals don't round-drift. Textures update only when
   `render_context_update` reports a new frame or the FBO was reallocated; layout animation keeps using
   cached textures.
-- **Masks and fit happen in the fragment shader** in `initializeGL` (rect/circle/hexagon SDFs blended by
+- **Masks and fit happen in the shared fragment shader** in `compositor.cpp` (rect/circle/hexagon SDFs blended by
   `maskProgress`, crop-vs-fit scaling, background colour outside the video rect). Layout geometry comes
   from `makeLayout`; the shader never picks positions.
 
@@ -135,3 +137,55 @@ Do not "simplify" that destructor back to a direct `api.terminate_destroy(handle
 
 Note for future crash work: `Start-Process -PassThru -Wait` reports `ExitCode 0` for runs that actually
 crashed. Use `subprocess.run`, bash `$?`, or `System.Diagnostics.Process` to measure an exit code here.
+
+## Offline export — 2026-09-06
+
+Codex and Claude both work here; see `AGENTS.md`. The user approved `EXPORT_PLAN.md` and requested
+implementation. Export creates a fresh randomized session with the currently applied settings. Clip
+audio follows Play's changing exclusive source, or an imported MP3/WAV replaces it. Export owns its
+shuffle and never writes the library from a worker thread.
+
+- `compositor.*` now owns the shared shader/geometry helpers formerly embedded in Canvas. Play still
+  uses libmpv RGBA textures. Export uploads NV12 luma/chroma textures, uses the same compositor, and
+  converts the resulting framebuffer to top-down limited-range BT.709 NV12 in a second GPU pass.
+- `export_timeline.*` advances at exact output timestamps, sharing core selection/layout helpers and
+  compositor easing. Source clips keep their identity/geometry through cuts. Source reads continue to
+  the usable end if shuffle defers a cut, then hold the final frame. Audio spans stop at the usable end.
+- `exporter.*` runs on a QThread with its own OpenGL context. The QOffscreenSurface is created and
+  destroyed on the GUI thread. Decoder processes request D3D11VA and retry in software; NVENC is the
+  default encoder, with an explicitly selected x264 fallback. Process arguments are structured QStringLists.
+- Raw decoder stdout uses **MediaPipe**, an explicitly bounded Windows pipe. Do not replace it with
+  QProcess reads: Qt's Windows pipe reader drains on a background thread even without an event loop,
+  which buffered whole clips and caused roughly 18 GiB RSS at eight 1080p sources in the initial prototype.
+  Encoder input is bounded; two pixel-buffer objects overlap GPU readback, and preview uses one latest
+  downscaled QImage protected by a mutex. Source frame buffers are sized for the selected output, not
+  the playback texture limit or preview widget size.
+- `export_dialog.*` decodes imported audio to a null sink asynchronously to measure audible length.
+  Matching snaps duration; manual duration trims/pads. Video frame count is ceil(duration * fps), so
+  matching may add less than one frame of silence. AAC uses 48 kHz stereo at 192 kb/s.
+- `window_export.cpp` pauses/locks ordinary playback, shows export frames in the central stack, then
+  restores the prior state. Completion controls use QWidgetAction visibility, not child widget hide(),
+  because QToolBar can show its widgets again during layout. Closing an active export requests cancel;
+  shutdown joins the worker before destroying its offscreen surface.
+- Output is staged beside the destination, muxed, checked with FFprobe, and replaced with MoveFileExW
+  only after success. Errors/cancel leave existing output intact. Never delete a destination to publish.
+
+The implementation uses pinned FFmpeg **processes**, with bounded CPU-memory NV12 transfers rather
+than linked codec libraries or a CUDA zero-copy bridge. Direct3D decode was materially faster to start
+than CUDA for the tested short clips; the GPU still handles composition/color conversion/NVENC.
+Both FFmpeg executable hashes are in `dependencies.lock.json`; `prepare_ffmpeg.py` prepares `.deps/ffmpeg`,
+and `build.ps1 -Deploy` verifies/copies them. No CUDA toolkit or additional system installation is needed.
+
+If the normal executable is open, `./scripts/build.ps1 -Test -Deploy -BuildDirectory build/export` makes
+an independent runnable build. Validation scripts honor `KALEIDOWALL_EXE` to test that executable. Keep
+the user's existing session intact. CLI export returns 0 on success, 1 on export failure, 2 on conflicting
+CLI options or unreadable settings JSON, and 3 on cancellation. `export.json` records source/audio spans, seed, stream metadata,
+and pipeline timings; `export_benchmark.py` records process-tree RAM and GPU telemetry separately.
+
+Final validation: all three CTest suites and 20 export integration scenarios passed, plus the original
+mixed-codec playback smoke test and orientation check. The 60 fps playback benchmark recorded a 16.71 ms
+mean frame interval, 18.08 ms p95, and no intervals above 50 ms after startup. See `PERFORMANCE.md` for
+export throughput and the 32-tile capacity check. One playback diagnostic issue surfaced during validation:
+the latest successful mute acknowledgment must also refresh the cached mute property, or a delayed
+observation can falsely report two unmuted players during a safe handoff. The backend regression test
+`acknowledgedMuteRefreshesDelayedObservation` covers this without adding synchronous mpv calls.

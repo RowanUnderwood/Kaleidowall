@@ -1,5 +1,6 @@
 #pragma once
 #include "canvas.h"
+#include "exporter.h"
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDockWidget>
@@ -8,6 +9,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMainWindow>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSlider>
 #include <QSpinBox>
@@ -30,6 +32,10 @@ class Window : public QMainWindow {
     }
     void showPanel(int);
     void toggleFullscreen();
+    void startExport(const ExportOptions&);
+    void cancelExport();
+  signals:
+    void exportFinished(bool success, bool canceled, const QString& message, const QJsonObject& report);
 
   protected:
     void closeEvent(QCloseEvent*) override;
@@ -46,6 +52,7 @@ class Window : public QMainWindow {
     void editVideo(int row);
     void refreshPresets();
     void revealControls();
+    void showExportDialog();
     Library* media;
     Canvas* player;
     QDockWidget* dock;
@@ -70,5 +77,18 @@ class Window : public QMainWindow {
     QTimer hideTimer, statsTimer;
     QVector<Video> rows;
     bool syncing = false;
+    QStackedWidget* canvasStack = nullptr;
+    QLabel* exportPreview = nullptr;
+    QToolBar* exportBar = nullptr;
+    QLabel* exportStatus = nullptr;
+    QProgressBar* exportProgress = nullptr;
+    QPushButton *exportCancel = nullptr, *exportOpen = nullptr, *exportFolder = nullptr;
+    QAction *exportCancelAction = nullptr, *exportOpenAction = nullptr, *exportFolderAction = nullptr;
+    ExportWorker* exportWorker = nullptr;
+    QOffscreenSurface* exportSurface = nullptr;
+    QTimer exportPreviewTimer;
+    bool resumeAfterExport = false, closeAfterExport = false;
+    bool restoreDockAfterExport = false;
+    QString completedExport;
 };
 } // namespace kaleido

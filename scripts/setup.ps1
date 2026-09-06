@@ -13,4 +13,6 @@ if (!(Test-Path -LiteralPath '.deps\Qt\6.8.3\msvc2022_64\bin\Qt6Core.dll')) {
 }
 & .\.venv\Scripts\python.exe scripts/dependencies.py
 if ($LASTEXITCODE -ne 0) { throw 'libmpv setup failed' }
+& .\.venv\Scripts\python.exe scripts/prepare_ffmpeg.py
+if ($LASTEXITCODE -ne 0) { throw 'FFmpeg preparation failed. See README.md export dependencies.' }
 & .\scripts\build.ps1 -Test -Deploy

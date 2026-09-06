@@ -29,3 +29,44 @@ These are comparable local workloads, not a replay of every file in the user's l
 Raw reports are under `test-output/benchmark/baseline60-20260906-042521`, `final60-20260906-043532`, and `final30-20260906-043700`. Run `python scripts/benchmark.py --label NAME --fps 60` to reproduce the workload. The benchmark intentionally uses generated media and an isolated library database.
 
 The core and backend test suites cover shuffle/clip behavior, asynchronous mute acknowledgments (including stale/failed replies), event-based property caching, redundant write suppression, render invalidation, and player-stop acknowledgment. The mixed-codec smoke test additionally checks active/idle pool bounds, exclusive audio, clip survival through layouts, pause/resume, and retirement to single-video mode.
+
+## Offline export measurements — 2026-09-06
+
+Twelve-second exports, High H.264 NVENC quality, 60 fps, synthetic 1920×1080/30 H.264 sources, 8–10 second clips, 3–4 second layout intervals, and 1.2 second transitions. Preview is enabled. Timings include export preparation/rendering/finalization but exclude library scanning and application startup. These are local workload measurements, not guarantees for other codecs or files.
+
+| Tiles | Output | Export time | Speed | Peak process-tree RAM |
+|---|---|---|---|---|
+| 2 | 1080p60 | 5.13 s | 2.34× | 1.12 GiB |
+| 4 | 1080p60 | 7.79 s | 1.54× | 1.52 GiB |
+| 8 | 1080p60 | 14.00 s | 0.86× | 2.31 GiB |
+| 2 | 2160p60 | 10.87 s | 1.10× | 2.11 GiB |
+| 4 | 2160p60 | 11.63 s | 1.03× | 2.50 GiB |
+| 8 | 2160p60 | 16.47 s | 0.73× | 2.99 GiB |
+
+The initial QProcess stdout implementation buffered decoded frames on Windows even without an event loop. At eight sources it reached about 17.5 GiB RAM at 1080p60 and took 29.41 seconds for a 12-second export. Explicitly bounded native pipes reduced this to about 2.31 GiB and 14.00 seconds. The older summary is retained in `test-output/export-benchmark/unbounded-summary.json`.
+
+The renderer uses GPU composition and RGB-to-NV12 conversion, two asynchronous pixel-buffer objects, and NVENC encoding. Source and output NV12 bytes still cross CPU memory; direct GPU interoperability could improve throughput further. Source decode/transfer dominates the eight-tile cases. CPU decoding threads are bounded by the slot count. Memory is allocated on demand instead of preallocating the machine’s 128 GiB.
+
+A separate 640×360 mixed-codec validation workload exported 12 seconds of 1080p60 output in about 3.6 seconds. Source resolution matters: that result should not be confused with the 1080p-source measurements above. Very short jobs also spend a larger fraction of their time starting decoders and finalizing the MP4.
+
+All measured GPU composition ran on the RTX 5090. GPU decode utilization was observed, while the driver’s NVENC utilization query reported zero despite successful forced `h264_nvenc` encoding; that counter is not used to infer encoder activity. GPU/CPU telemetry may include other work on the machine.
+
+A short capacity stress check also exported 32 simultaneous 1080p sources (duplicates enabled), producing
+two seconds of 1080p60 output in 9.74 seconds. Peak process-tree RAM was 6.44 GiB and reported GPU memory
+was 5.64 GiB. This checks capacity/cleanup, not sustained throughput or 32 simultaneous 4K/8K sources.
+Its report is `test-output/export-benchmark/summary-32tiles-1080p.json`.
+
+Reproduce with `python scripts/export_benchmark.py --seconds 12`. JSON timings, source/audio manifests, preview screenshots, and sampled memory/GPU telemetry are under `test-output/export-benchmark`. `KALEIDOWALL_EXE` selects an alternate executable. Offline exports advance by exact frame timestamps regardless of wall-clock speed; no real-time capture fallback was needed.
+
+### Playback regression after sharing the compositor
+
+The final 30-second run at a 60 fps target recorded a 16.71 ms mean frame interval, 18.08 ms p95,
+38.42 ms maximum, and zero intervals above 50 ms after startup. Maximum layout and audio-control
+passes were 3.77 ms and 0.021 ms respectively. One prepared-cut delay reached 218 ms, while rendering
+continued; source readiness can still defer cuts. Raw results are in
+`test-output/benchmark/export-regression-20260906-134907`.
+
+All three CTest suites and 20 export integration scenarios passed. The original orientation check passed,
+and the mixed-codec playback smoke test passed at `test-output/run-20260906-135334`. The latter exposed
+a delayed mute-property cache value during an acknowledged audio handoff; successful latest mute replies
+now refresh that cache, with a backend regression test preserving stale/failed-reply handling.

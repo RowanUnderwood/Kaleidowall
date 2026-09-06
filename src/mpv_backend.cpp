@@ -161,6 +161,11 @@ void Decoder::handleEvent(const mpv_event& event) {
         muteConfirmed = event.error >= 0 && requested.value("mute") == "yes";
         if (event.error < 0)
             requested.remove("mute");
+        else
+            // The reply is newer than our last property observation. Keep
+            // diagnostics in step with the acknowledged handoff even when
+            // mpv has not delivered the coalesced property change yet.
+            properties["mute"] = requested.value("mute") == "yes";
     } else if (event.event_id == MPV_EVENT_COMMAND_REPLY && event.reply_userdata == 2) {
         stopPending = event.error < 0;
     } else if (event.event_id == MPV_EVENT_START_FILE) {

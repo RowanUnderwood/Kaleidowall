@@ -30,7 +30,7 @@ env = os.environ.copy()
 env['PATH'] = str(ROOT / '.deps/Qt/6.8.3/msvc2022_64/bin') + os.pathsep + env['PATH']
 with (run / 'app.log').open('w') as log:
     subprocess.run([
-        str(ROOT / 'build/Release/Kaleidowall.exe'), '--data-dir', str(run),
+        os.environ.get("KALEIDOWALL_EXE", str(ROOT / "build/Release/Kaleidowall.exe")), '--data-dir', str(run),
         '--library', str(MEDIA), '--smoke', '12'
     ], env=env, stdout=log, stderr=log, check=True, timeout=45)
 pixels = subprocess.check_output([

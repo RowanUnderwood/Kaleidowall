@@ -11,9 +11,6 @@
 #include <cmath>
 
 namespace kaleido {
-static int maskFor(const QString& s) {
-    return s == "Circles" ? 1 : s == "Hexagons" ? 2 : 0;
-}
 Canvas::Canvas(Library* lib, QWidget* parent) : QOpenGLWidget(parent), library(lib) {
     setMinimumSize(320, 240);
     setMouseTracking(true);
@@ -41,9 +38,7 @@ Canvas::~Canvas() {
     makeCurrent();
     clearSlots();
     if (initialized) {
-        glDeleteBuffers(1, &vbo);
-        glDeleteVertexArrays(1, &vao);
-        program.removeAllShaders();
+        compositor.release();
     }
     doneCurrent();
 }
@@ -60,57 +55,16 @@ void Canvas::initializeGL() {
         lastError = "libmpv could not load: " + api.error;
         emit status(lastError);
     }
-    const char* vertex = R"(#version 330 core
-        layout(location=0) in vec2 position;
-        out vec2 uv;
-        uniform vec4 rect;
-        void main(){uv=position;vec2 p=rect.xy+position*rect.zw;gl_Position=vec4(p.x*2.-1.,1.-p.y*2.,0.,1.);}
-    )";
-    const char* fragment = R"(#version 330 core
-        in vec2 uv;out vec4 color;
-        uniform sampler2D frame;
-        uniform vec2 videoSize,viewSize;
-        uniform vec3 backgroundColor;
-        uniform float alpha,maskProgress;
-        uniform int crop,oldMask,newMask;
-        float shape(int kind,vec2 p){
-            if(kind==0)return max(abs(p.x),abs(p.y))-.5;
-            vec2 q=(p*viewSize)/min(viewSize.x,viewSize.y);
-            if(kind==1)return length(q)-.485;
-            q=abs(q);return max(q.y,dot(q,vec2(.8660254,.5)))-.465;
-        }
-        void main(){
-            vec2 p=uv-.5;
-            float d=mix(shape(oldMask,p),shape(newMask,p),maskProgress);
-            float edge=1.-smoothstep(-.002,.002,d);
-            if(edge<=0.)discard;
-            float va=videoSize.x/videoSize.y,da=viewSize.x/viewSize.y;
-            vec2 scale=vec2(1.);
-            if(crop==1){if(va>da)scale.x=da/va;else scale.y=va/da;}
-            else {if(va>da)scale.y=va/da;else scale.x=da/va;}
-            vec2 t=p*scale+.5;
-            vec3 rgb=any(lessThan(t,vec2(0.)))||any(greaterThan(t,vec2(1.)))?backgroundColor:texture(frame,t).rgb;
-            color=vec4(rgb,alpha*edge);
-        }
-    )";
-    if (!program.addShaderFromSourceCode(QOpenGLShader::Vertex, vertex) ||
-        !program.addShaderFromSourceCode(QOpenGLShader::Fragment, fragment) || !program.link()) {
+    if (!compositor.initialize()) {
         available = false;
-        lastError = program.log();
+        lastError = compositor.error();
         emit status(lastError);
-        return;
     }
-    float vertices[] = {0, 0, 1, 0, 0, 1, 1, 1};
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
-    glBindVertexArray(0);
 }
+
 void Canvas::applySettings(const Settings& s) {
+    if (exportLocked)
+        return;
     const bool changeSelection = s.clipMin != config.clipMin || s.clipMax != config.clipMax ||
                                  s.skipStart != config.skipStart || s.skipEnd != config.skipEnd ||
                                  s.skipPercent != config.skipPercent || s.duplicates != config.duplicates;
@@ -142,6 +96,8 @@ void Canvas::applySettings(const Settings& s) {
     update();
 }
 void Canvas::setAudio(bool muted, int volume) {
+    if (exportLocked)
+        return;
     config.muted = muted;
     config.volume = std::clamp(volume, 0, 100);
     routeAudio();
@@ -173,6 +129,8 @@ void Canvas::persistShuffle() {
     library->setValue("shuffle", bag.json());
 }
 void Canvas::playPause() {
+    if (exportLocked)
+        return;
     if (!running) {
         if (!available) {
             emit status(lastError.isEmpty() ? "Video renderer is not ready." : lastError);
@@ -204,6 +162,8 @@ void Canvas::clearSlots() {
     audioSerial = -1;
 }
 void Canvas::stop() {
+    if (exportLocked)
+        return;
     makeCurrent();
     clearSlots();
     doneCurrent();
@@ -215,16 +175,12 @@ void Canvas::stop() {
     update();
 }
 double Canvas::progress() const {
-    if (transitionDuration <= 0)
-        return 1;
-    double t = std::clamp((sessionTime - transitionStart) / transitionDuration, 0.0, 1.0);
-    return t * t * (3 - 2 * t);
+    return easedProgress(sessionTime, transitionStart, transitionDuration);
 }
 QRectF Canvas::rectangle(const Slot& s) const {
-    double t = progress();
-    return QRectF(s.from.topLeft() * (1 - t) + s.target.topLeft() * t,
-                  s.from.size() * (1 - t) + s.target.size() * t);
+    return interpolateRect(s.from, s.target, progress());
 }
+
 void Canvas::finishTransition() {
     QElapsedTimer measure;
     measure.start();
@@ -269,6 +225,8 @@ void Canvas::warmPool(int count) {
     doneCurrent();
 }
 void Canvas::nextLayout() {
+    if (exportLocked)
+        return;
     QElapsedTimer measure;
     measure.start();
     auto measured = qScopeGuard([&] { recordTiming("layout", measure.nsecsElapsed() / 1e6); });
@@ -299,7 +257,7 @@ void Canvas::nextLayout() {
         emit status(QString("Using %1 players: only %2 eligible videos.").arg(cap).arg(videos.size()));
     fromMask = targetMask;
     mode = pickMode(config, rng, mode);
-    targetMask = count == 1 ? 0 : maskFor(mode);
+    targetMask = count == 1 ? 0 : maskKind(mode);
     auto layout = makeLayout(mode, count, double(width()) / std::max(1, height()), rng);
     for (auto& s : players) {
         s->from = s->target;
@@ -492,6 +450,8 @@ void Canvas::cutPreparedClips() {
     }
 }
 void Canvas::nextClips() {
+    if (exportLocked)
+        return;
     if (!running)
         return;
     for (auto& s : players)
@@ -501,6 +461,8 @@ void Canvas::nextClips() {
     update();
 }
 void Canvas::nextAudio() {
+    if (exportLocked)
+        return;
     audioSerial = -1;
     QVector<int> options;
     for (auto& s : players)
@@ -686,44 +648,21 @@ void Canvas::paintGL() {
         }
     }
     cutPreparedClips();
-    glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
-    glViewport(0, 0, w, h);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_SCISSOR_TEST);
     const QColor background(config.backgroundColor);
-    glClearColor(background.redF(), background.greenF(), background.blueF(), 1);
-    glClear(GL_COLOR_BUFFER_BIT);
-    if (available) {
-        program.bind();
-        program.setUniformValue("backgroundColor",
-                                QVector3D(background.redF(), background.greenF(), background.blueF()));
-        glBindVertexArray(vao);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glActiveTexture(GL_TEXTURE0);
-        for (const auto& s : players) {
-            if (!s->fbo || !s->hasFrame)
-                continue;
-            QRectF r = rectangle(*s);
-            r.adjust(2.0 / width(), 2.0 / height(), -2.0 / width(), -2.0 / height());
-            double t = progress();
-            program.setUniformValue(
-                "rect", QVector4D(float(r.x()), float(r.y()), float(r.width()), float(r.height())));
-            program.setUniformValue("viewSize", QVector2D(float(r.width() * w), float(r.height() * h)));
-            program.setUniformValue("videoSize", QVector2D(float(std::max(1, s->displayWidth)),
-                                                           float(std::max(1, s->displayHeight))));
-            program.setUniformValue("alpha", float(s->opacityFrom * (1 - t) + s->opacityTarget * t));
-            program.setUniformValue("oldMask", fromMask);
-            program.setUniformValue("newMask", targetMask);
-            program.setUniformValue("maskProgress", float(t));
-            program.setUniformValue("crop", config.crop ? 1 : 0);
-            program.setUniformValue("frame", 0);
-            glBindTexture(GL_TEXTURE_2D, s->fbo->texture());
-            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        }
-        glBindVertexArray(0);
-        program.release();
-        glDisable(GL_BLEND);
+    std::vector<DrawTile> tiles;
+    const double t = progress();
+    for (const auto& s : players)
+        if (s->fbo && s->hasFrame)
+            tiles.push_back({s->fbo->texture(),
+                             QSize(std::max(1, s->displayWidth), std::max(1, s->displayHeight)),
+                             rectangle(*s), float(s->opacityFrom * (1 - t) + s->opacityTarget * t)});
+    if (available)
+        compositor.draw(defaultFramebufferObject(), QSize(w, h), size(), background, config.crop, fromMask,
+                        targetMask, float(t), tiles);
+    else {
+        glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+        glClearColor(background.redF(), background.greenF(), background.blueF(), 1);
+        glClear(GL_COLOR_BUFFER_BIT);
     }
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
