@@ -91,9 +91,17 @@ def export(name, seconds=2.1, height=720, fps=30, quality="high", audio=None,
     assert bool([s for s in metadata["streams"] if s["codec_type"] == "audio"]) == bool(audio)
     ffmpeg("-i", output, "-f", "null", "-")
     assert not list(output.parent.glob(".kaleidowall-*")), "Leaked export staging directory"
+    # Decode and encode must land on the card that composited, not wherever each index space
+    # happens to put device 0.
+    compositor = report["gpu"].split("/")[0].strip()
+    if report["gpuDecode"]:
+        assert report["gpuDecode"] == compositor, (name, report["gpuDecode"], compositor)
+    if report["encoder"] == "h264_nvenc" and report["gpuEncode"]:
+        assert report["gpuEncode"] == compositor, (name, report["gpuEncode"], compositor)
     summary = dict(name=name, duration=n / fps, elapsed=report["elapsedSeconds"],
                    speed=round((n / fps) / report["elapsedSeconds"], 2),
-                   decodeMs=report["decodeUploadMs"], encodeMs=report["encoderWriteMs"])
+                   decodeMs=report["decodeUploadMs"], encodeMs=report["encoderWriteMs"],
+                   gpu=report.get("gpuEncode", ""))
     results.append(summary)
     print("PASS", summary, flush=True)
     return output, report

@@ -1,9 +1,32 @@
 #include "core.h"
 #include "library.h"
+#include <QDir>
 #include <QFile>
+#include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
 using namespace kaleido;
+// Videos only reach the table through a scan, which needs ffprobe and real media. These tests are
+// about folder bookkeeping, so they seed rows directly over a second connection.
+static void seedVideo(const QString& dbPath, const QString& id) {
+    static int counter = 0;
+    const QString name = "seed-" + QString::number(++counter);
+    {
+        auto db = QSqlDatabase::addDatabase("QSQLITE", name);
+        db.setDatabaseName(dbPath);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        q.prepare("INSERT OR REPLACE INTO videos(id,path,title,duration,width,height,codec,audio,error,"
+                  "size,modified) VALUES(?,?,?,?,?,?,?,?,'',0,0)");
+        for (const QVariant& a : QVariantList{id, id, QString("clip"), 60.0, 1920, 1080, QString("h264"), 0})
+            q.addBindValue(a);
+        QVERIFY2(q.exec(), qPrintable(q.lastError().text()));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(name);
+}
 class CoreTests : public QObject {
     Q_OBJECT
   private slots:
@@ -186,6 +209,94 @@ class CoreTests : public QObject {
         }
         Library reopened(temp.filePath("test.db"));
         QCOMPARE(reopened.value("settings"), Settings{}.json());
+    }
+    void disabledFolderExcludesItsVideos() {
+        QTemporaryDir temp;
+        const QString dbPath = temp.filePath("folders.db");
+        QString root;
+        {
+            Library lib(dbPath);
+            QVERIFY(lib.error().isEmpty());
+            lib.addFolder(temp.path());
+            root = lib.folders().first().path;
+            QVERIFY(lib.folders().first().enabled);
+            seedVideo(dbPath, root + "/clip.mp4");
+            QCOMPARE(lib.videos().size(), 1);
+            QVERIFY(lib.videos().first().folderEnabled);
+            QVERIFY(eligibilityReason(lib.videos().first(), Settings{}).isEmpty());
+            lib.setFolderEnabled(root, false);
+            QVERIFY(!lib.folders().first().enabled);
+            // The video row itself is untouched; only the derived flag changes.
+            QVERIFY(lib.videos().first().enabled);
+            QVERIFY(!lib.videos().first().folderEnabled);
+            QCOMPARE(eligibilityReason(lib.videos().first(), Settings{}), QString("Folder disabled"));
+        }
+        Library reopened(dbPath);
+        QVERIFY(!reopened.folders().first().enabled);
+        reopened.setFolderEnabled(root, true);
+        QVERIFY(reopened.videos().first().folderEnabled);
+        QVERIFY(eligibilityReason(reopened.videos().first(), Settings{}).isEmpty());
+    }
+    void overlappingFoldersIncludeWhenEitherIsEnabled() {
+        QTemporaryDir temp;
+        QVERIFY(QDir(temp.path()).mkpath("sub"));
+        const QString dbPath = temp.filePath("overlap.db");
+        Library lib(dbPath);
+        lib.addFolder(temp.path());
+        lib.addFolder(temp.path() + "/sub");
+        QCOMPARE(lib.folders().size(), 2);
+        QString parent, child;
+        for (const auto& f : lib.folders())
+            (f.path.endsWith("/sub") ? child : parent) = f.path;
+        QVERIFY(!parent.isEmpty() && !child.isEmpty());
+        seedVideo(dbPath, child + "/clip.mp4");
+        // Disabling one covering folder is not enough while another still covers the video.
+        lib.setFolderEnabled(child, false);
+        QVERIFY(lib.videos().first().folderEnabled);
+        lib.setFolderEnabled(parent, false);
+        QVERIFY(!lib.videos().first().folderEnabled);
+        lib.setFolderEnabled(child, true);
+        QVERIFY(lib.videos().first().folderEnabled);
+    }
+    void removingAFolderKeepsVideosCoveredByADisabledOne() {
+        QTemporaryDir temp;
+        QVERIFY(QDir(temp.path()).mkpath("sub"));
+        const QString dbPath = temp.filePath("remove.db");
+        Library lib(dbPath);
+        lib.addFolder(temp.path());
+        lib.addFolder(temp.path() + "/sub");
+        QString parent, child;
+        for (const auto& f : lib.folders())
+            (f.path.endsWith("/sub") ? child : parent) = f.path;
+        seedVideo(dbPath, child + "/clip.mp4");
+        lib.setFolderEnabled(child, false);
+        lib.removeFolder(parent);
+        // A disabled folder is parked, not forgotten: its rows survive the prune.
+        QCOMPARE(lib.videos().size(), 1);
+        QVERIFY(!lib.videos().first().folderEnabled);
+    }
+    void legacyFolderTableGainsTheEnabledColumn() {
+        QTemporaryDir temp;
+        const QString dbPath = temp.filePath("legacy.db");
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", "legacy");
+            db.setDatabaseName(dbPath);
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("CREATE TABLE folders(path TEXT PRIMARY KEY)"));
+            QVERIFY(q.exec("INSERT INTO folders VALUES('c:/videos')"));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("legacy");
+        Library lib(dbPath);
+        QVERIFY2(lib.error().isEmpty(), qPrintable(lib.error()));
+        QCOMPARE(lib.folders().size(), 1);
+        QCOMPARE(lib.folders().first().path, QString("c:/videos"));
+        // Pre-existing folders default to enabled, so an upgrade never silently empties a library.
+        QVERIFY(lib.folders().first().enabled);
+        seedVideo(dbPath, "c:/videos/clip.mp4");
+        QCOMPARE(lib.videos().size(), 1);
+        QVERIFY(lib.videos().first().folderEnabled);
     }
 };
 QTEST_GUILESS_MAIN(CoreTests)

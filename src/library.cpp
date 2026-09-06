@@ -17,6 +17,14 @@ static QString canonical(const QString& path) {
     auto p = f.canonicalFilePath();
     return QDir::cleanPath(p.isEmpty() ? f.absoluteFilePath() : p).toLower();
 }
+// Folder membership is prefix-only: video ids are lowercased canonical paths, so a video
+// belongs to every root it sits beneath. Overlapping roots therefore share their videos.
+static bool covered(const QStringList& roots, const QString& id) {
+    for (const auto& root : roots)
+        if (id.startsWith(root + "/", Qt::CaseInsensitive))
+            return true;
+    return false;
+}
 Library::Library(const QString& path, QObject* parent) : QObject(parent) {
     connectionName = QUuid::createUuid().toString();
     db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
@@ -27,13 +35,24 @@ Library::Library(const QString& path, QObject* parent) : QObject(parent) {
     }
     QSqlQuery q(db);
     for (const auto& sql :
-         {"PRAGMA journal_mode=WAL", "CREATE TABLE IF NOT EXISTS folders(path TEXT PRIMARY KEY)",
+         {"PRAGMA journal_mode=WAL",
+          "CREATE TABLE IF NOT EXISTS folders(path TEXT PRIMARY KEY, enabled INTEGER DEFAULT 1)",
           "CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT NOT NULL)",
           "CREATE TABLE IF NOT EXISTS videos(id TEXT PRIMARY KEY,path TEXT,title TEXT,duration REAL,width "
           "INTEGER,height INTEGER,codec TEXT,audio INTEGER,enabled INTEGER DEFAULT 1,skipStart REAL DEFAULT "
           "-1,skipEnd REAL DEFAULT -1,error TEXT,missing INTEGER DEFAULT 0,size INTEGER,modified INTEGER)"})
         if (!q.exec(sql))
             dbError = q.lastError().text();
+    // CREATE TABLE IF NOT EXISTS is a no-op on a database written by an older build, and SQLite has
+    // no ADD COLUMN IF NOT EXISTS, so probe before altering. Without this every folders query on an
+    // existing library fails and the library silently reads as empty.
+    bool hasEnabled = false;
+    if (q.exec("PRAGMA table_info(folders)"))
+        while (q.next())
+            if (q.value(1).toString().compare("enabled", Qt::CaseInsensitive) == 0)
+                hasEnabled = true;
+    if (!hasEnabled && !q.exec("ALTER TABLE folders ADD COLUMN enabled INTEGER DEFAULT 1"))
+        dbError = q.lastError().text();
 }
 Library::~Library() {
     canceled = true;
@@ -45,18 +64,28 @@ Library::~Library() {
     db = QSqlDatabase();
     QSqlDatabase::removeDatabase(connectionName);
 }
-QStringList Library::folders() const {
+QVector<Folder> Library::folders() const {
     QSqlQuery q(db);
-    q.exec("SELECT path FROM folders ORDER BY path");
-    QStringList out;
+    q.exec("SELECT path,enabled FROM folders ORDER BY path");
+    QVector<Folder> out;
     while (q.next())
-        out << q.value(0).toString();
+        out << Folder{q.value(0).toString(), q.value(1).toBool()};
     return out;
 }
+
 void Library::addFolder(const QString& path) {
     QSqlQuery q(db);
-    q.prepare("INSERT OR IGNORE INTO folders VALUES(?)");
+    // Name the column: the positional form breaks as soon as the table gains one.
+    q.prepare("INSERT OR IGNORE INTO folders(path) VALUES(?)");
     q.addBindValue(canonical(path));
+    q.exec();
+    emit changed();
+}
+void Library::setFolderEnabled(const QString& path, bool enabled) {
+    QSqlQuery q(db);
+    q.prepare("UPDATE folders SET enabled=? WHERE path=?");
+    q.addBindValue(enabled);
+    q.addBindValue(path);
     q.exec();
     emit changed();
 }
@@ -67,26 +96,29 @@ void Library::removeFolder(const QString& path) {
     q.prepare("DELETE FROM folders WHERE path=?");
     q.addBindValue(path);
     q.exec();
-    auto roots = folders();
+    // Every remaining root keeps its videos, disabled ones included: a disabled folder is parked,
+    // not forgotten, so removing an overlapping folder must not delete what it still covers.
+    QStringList roots;
+    for (const auto& f : folders())
+        roots << f.path;
     auto all = videos();
     db.transaction();
-    for (const auto& v : all) {
-        bool covered = false;
-        for (const auto& root : roots)
-            if (v.id.startsWith(root + "/", Qt::CaseInsensitive)) {
-                covered = true;
-                break;
-            }
-        if (!covered) {
+    for (const auto& v : all)
+        if (!covered(roots, v.id)) {
             q.prepare("DELETE FROM videos WHERE id=?");
             q.addBindValue(v.id);
             q.exec();
         }
-    }
     db.commit();
     emit changed();
 }
 QVector<Video> Library::videos() const {
+    QStringList roots, enabledRoots;
+    for (const auto& f : folders()) {
+        roots << f.path;
+        if (f.enabled)
+            enabledRoots << f.path;
+    }
     QSqlQuery q(db);
     q.exec("SELECT id,path,title,duration,width,height,codec,audio,enabled,skipStart,skipEnd,error,missing "
            "FROM videos ORDER BY title");
@@ -106,6 +138,9 @@ QVector<Video> Library::videos() const {
         v.skipEnd = q.value(10).toDouble();
         v.error = q.value(11).toString();
         v.missing = q.value(12).toBool();
+        // Any enabled folder containing the video includes it. A row that matches no root at all
+        // stays eligible, so an unexpected path shape can never silently empty the library.
+        v.folderEnabled = !covered(roots, v.id) || covered(enabledRoots, v.id);
         out << v;
     }
     return out;
@@ -169,9 +204,18 @@ void Library::scan() {
         emit scanStatus("FFprobe missing. Place ffprobe.exe next to the player or on PATH.");
         return;
     }
-    auto roots = folders();
-    if (roots.empty()) {
+    auto all = folders();
+    if (all.empty()) {
         emit scanStatus("Add a folder to start indexing.");
+        return;
+    }
+    // Disabled folders are skipped entirely, so a parked drive costs nothing to rescan.
+    QStringList roots;
+    for (const auto& f : all)
+        if (f.enabled)
+            roots << f.path;
+    if (roots.empty()) {
+        emit scanStatus("All library folders are disabled. Tick one to index it.");
         return;
     }
     QHash<QString, QPair<qint64, qint64>> cached;
@@ -259,16 +303,19 @@ void Library::scan() {
         bool completed = !canceled;
         QMetaObject::invokeMethod(
             this,
-            [this, seen, completed, total] {
+            [this, seen, completed, total, roots] {
                 if (completed) {
                     db.transaction();
                     QSqlQuery q(db);
-                    for (const auto& v : videos()) {
-                        q.prepare("UPDATE videos SET missing=? WHERE id=?");
-                        q.addBindValue(!seen.contains(v.id));
-                        q.addBindValue(v.id);
-                        q.exec();
-                    }
+                    // Only folders this scan actually walked can testify that a file is gone.
+                    // Videos under a disabled root were never looked for, so leave them alone.
+                    for (const auto& v : videos())
+                        if (covered(roots, v.id)) {
+                            q.prepare("UPDATE videos SET missing=? WHERE id=?");
+                            q.addBindValue(!seen.contains(v.id));
+                            q.addBindValue(v.id);
+                            q.exec();
+                        }
                     db.commit();
                 }
                 emit changed();

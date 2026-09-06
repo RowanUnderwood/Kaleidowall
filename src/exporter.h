@@ -16,6 +16,9 @@ struct ExportOptions {
     int audioMode = 0;
     bool softwareEncoder = false, overwrite = false;
     unsigned seed = 0;
+    // Resolved by ExportWorker from the compositing GPU, not chosen in the dialog. They live in
+    // different index spaces: decodeAdapter is a DXGI index, encodeGpu an NVENC ordinal.
+    int decodeAdapter = 0, encodeGpu = 0;
     qint64 frameCount() const;
     double outputDuration() const;
     QString validate() const;

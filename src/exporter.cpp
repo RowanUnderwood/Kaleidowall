@@ -1,6 +1,7 @@
 #include "exporter.h"
 #include "compositor.h"
 #include "export_timeline.h"
+#include "gpu.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
@@ -81,6 +82,12 @@ void startProcess(QProcess& process, const QString& exe, const QStringList& args
     checkCancel(cancel);
     process.setProgram(exe);
     process.setArguments(args);
+    // NVENC ordinals otherwise follow CUDA's "fastest first" heuristic, which on a mixed machine
+    // is neither PCI order nor DXGI order. Pinning the ordering here — the one place every FFmpeg
+    // and FFprobe child is launched — makes -gpu mean the same card as the probe that resolved it.
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("CUDA_DEVICE_ORDER", "PCI_BUS_ID");
+    process.setProcessEnvironment(environment);
     process.start();
     QElapsedTimer timeout;
     timeout.start();
@@ -318,7 +325,8 @@ class ClipReader {
                          "-threads",
                          QString::number(threadBudget)};
         if (hw)
-            args << "-hwaccel" << "d3d11va" << "-hwaccel_device" << "0";
+            args << "-hwaccel" << "d3d11va" << "-hwaccel_device"
+                 << QString::number(options.decodeAdapter);
         QString filter = QString("setpts=PTS-STARTPTS,fps=fps=%1:start_time=0,").arg(options.fps);
         filter +=
             QString("scale=%1:%2:flags=bilinear:out_color_matrix=bt709:out_range=tv,setsar=1,format=nv12")
@@ -469,6 +477,7 @@ QImage ExportWorker::takePreview() {
 void ExportWorker::run() {
     QElapsedTimer elapsed;
     elapsed.start();
+    GpuSelection device;
     try {
         const auto invalid = options.validate();
         if (!invalid.isEmpty())
@@ -512,6 +521,11 @@ void ExportWorker::run() {
         if (!gl.initializeOpenGLFunctions())
             throw Failure("OpenGL 3.3 is unavailable for export.");
         const QString gpu = QString::fromLatin1(reinterpret_cast<const char*>(gl.glGetString(GL_RENDERER)));
+        // Decode and encode follow the card that composites, so a multi-GPU machine does not split
+        // the pipeline across adapters. Resolved before any child process is launched.
+        device = selectExportGpu(gpu);
+        options.decodeAdapter = device.dxgi;
+        options.encodeGpu = device.nvenc;
         Compositor compositor;
         if (!compositor.initialize())
             throw Failure("Export compositor: " + compositor.error());
@@ -566,7 +580,7 @@ void ExportWorker::run() {
                                                          : 19)
                        << "-threads" << "8";
         else
-            encodeArgs << "-c:v" << "h264_nvenc" << "-gpu" << "0" << "-preset"
+            encodeArgs << "-c:v" << "h264_nvenc" << "-gpu" << QString::number(options.encodeGpu) << "-preset"
                        << (quality == 0   ? "p4"
                            : quality == 1 ? "p5"
                                           : "p6")
@@ -804,6 +818,10 @@ void ExportWorker::run() {
                                            {"sourceStart", span.sourceStart},
                                            {"stream", span.stream}});
         report = {{"gpu", gpu},
+                  {"gpuDecode", device.decodeName},
+                  {"gpuEncode", device.encodeName},
+                  {"decodeAdapter", options.decodeAdapter},
+                  {"encodeGpu", options.encodeGpu},
                   {"encoder", options.softwareEncoder ? "libx264" : "h264_nvenc"},
                   {"seed", double(options.seed)},
                   {"frames", double(options.frameCount())},
@@ -821,8 +839,13 @@ void ExportWorker::run() {
         emit result(true, false, options.destination);
     } catch (const std::exception& e) {
         QString message = QString::fromUtf8(e.what());
-        if (!options.softwareEncoder && !canceled.load() && message.contains("nvenc", Qt::CaseInsensitive))
+        if (!options.softwareEncoder && !canceled.load() && message.contains("nvenc", Qt::CaseInsensitive)) {
+            if (!device.encodeMatched)
+                message += "\nNVENC could not be matched to the compositing GPU, so it fell back to "
+                           "device " +
+                           QString::number(options.encodeGpu) + ".";
             message += "\nYou can retry using CPU fallback in the Export dialog.";
+        }
         emit result(false, canceled.load(), message);
     }
 }

@@ -77,6 +77,9 @@ class Window : public QMainWindow {
     QTimer hideTimer, statsTimer;
     QVector<Video> rows;
     bool syncing = false;
+    // Separate from `syncing`: refreshLibrary rebuilds the folder rows and would otherwise
+    // re-enter setFolderEnabled through itemChanged.
+    bool rebuildingFolders = false;
     QStackedWidget* canvasStack = nullptr;
     QLabel* exportPreview = nullptr;
     QToolBar* exportBar = nullptr;

@@ -59,6 +59,15 @@ that owns all playback) → `Decoder`/`MpvApi` (libmpv) and `Library` (SQLite + 
   FFprobe per file and marshals each result back with `QMetaObject::invokeMethod(..., QueuedConnection)`;
   incremental rescans skip files whose (size, mtime) match. Video ids are lowercased canonical paths, which
   is how overlapping folders deduplicate. The recognised extension list is in `Library::scan`.
+  Folder membership is prefix-only (`covered()`), so a video belongs to every root above it. `folders.enabled`
+  drives the library panel's tick boxes: `videos()` derives `Video::folderEnabled` (true while *any*
+  covering folder is ticked, and for a video no root covers at all), and `eligibilityReason` turns that
+  into "Folder disabled" so playback, export, and the video table all honour it from one place. Two traps:
+  `scan()` walks only ticked roots, so its `missing` pass must be restricted to the roots it actually
+  walked or every parked video is flagged missing; and the schema has no migration framework beyond
+  `CREATE TABLE IF NOT EXISTS`, so `folders.enabled` is added by a `PRAGMA table_info` probe plus
+  `ALTER TABLE`. `videos()` ignores its query result, so a missed migration reads as an empty library
+  rather than an error — add columns with that probe, and name columns in every `INSERT`.
 - **`src/mpv_backend.*`** — libmpv is loaded dynamically through `QLibrary`; every entry point is a member
   function pointer in `MpvApi` (the `API(name)` macro). Tests exploit this by assigning fake function
   pointers, so `Decoder` logic is unit-testable with no real mpv. `Decoder` keeps an event-driven property
@@ -154,6 +163,14 @@ shuffle and never writes the library from a worker thread.
 - `exporter.*` runs on a QThread with its own OpenGL context. The QOffscreenSurface is created and
   destroyed on the GUI thread. Decoder processes request D3D11VA and retry in software; NVENC is the
   default encoder, with an explicitly selected x264 fallback. Process arguments are structured QStringLists.
+- **Never hardcode a GPU index.** FFmpeg addresses adapters through three orderings that disagree on a
+  multi-GPU machine: DXGI adapter order (`-hwaccel_device`), the NVENC/CUDA ordinal (`-gpu`), and NVML/PCI
+  order (`nvidia-smi -i`). All three were once `0`, which put decode and composition on the RTX 5090 while
+  NVENC silently ran on the 4090 and the benchmark sampled the wrong card. `gpu.*` enumerates DXGI natively
+  and NVENC by parsing an out-of-range `-gpu` probe, then matches both against the compositing GPU's
+  `GL_RENDERER`; `startProcess` pins `CUDA_DEVICE_ORDER=PCI_BUS_ID` on every FFmpeg child so an ordinal
+  means the same card everywhere. `export.json` records `gpuDecode`/`gpuEncode` and `export_test.py`
+  asserts both equal the compositor.
 - Raw decoder stdout uses **MediaPipe**, an explicitly bounded Windows pipe. Do not replace it with
   QProcess reads: Qt's Windows pipe reader drains on a background thread even without an event loop,
   which buffered whole clips and caused roughly 18 GiB RSS at eight 1080p sources in the initial prototype.

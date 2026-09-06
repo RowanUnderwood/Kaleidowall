@@ -14,9 +14,10 @@ class Library : public QObject {
     QString error() const {
         return dbError;
     }
-    QStringList folders() const;
+    QVector<Folder> folders() const;
     void addFolder(const QString&);
     void removeFolder(const QString&);
+    void setFolderEnabled(const QString& path, bool enabled);
     QVector<Video> videos() const;
     void updateVideo(const QString& id, bool enabled, double start, double end);
     QJsonObject value(const QString& key) const;

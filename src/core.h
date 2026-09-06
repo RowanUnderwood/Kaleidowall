@@ -22,11 +22,17 @@ struct Settings {
     QJsonObject json() const;
     static Settings fromJson(const QJsonObject&);
 };
+struct Folder {
+    QString path;
+    bool enabled = true;
+};
 struct Video {
     QString id, path, title, codec, error;
     double duration = 0, skipStart = -1, skipEnd = -1;
     int width = 0, height = 0;
     bool audio = false, enabled = true, missing = false;
+    // Derived from the owning folders at query time; never stored on the video row.
+    bool folderEnabled = true;
 };
 struct Clip {
     double start = 0, length = 0;

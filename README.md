@@ -8,11 +8,11 @@ Run **`./Start-Kaleidowall.ps1`** in PowerShell. It launches the newer executabl
 `build/export/Release`; the latter allows rebuilding while the original application is still open.
 You can also double-click the executable in that build folder.
 
-1. Open **Library → Add folder**. Scanning is recursive and runs in the background.
+1. Open **Library → Add folder**. Scanning is recursive and runs in the background. Each folder has a tick box: untick one to drop it from playback and export without losing its index.
 2. Choose a preset or adjust settings, then select **Apply settings**.
 3. Press **Play**. Use **F11** or double-click the player for fullscreen.
 
-The source files stay where they are. Removing a library folder only removes its index entries. The app stores its database, presets, settings, and shuffle position in `%LOCALAPPDATA%/Kaleidowall/Kaleidowall`. A `--data-dir PATH` argument uses a separate database for testing.
+The source files stay where they are. Removing a library folder only removes its index entries; unticking one keeps them. The app stores its database, presets, settings, and shuffle position in `%LOCALAPPDATA%/Kaleidowall/Kaleidowall`. A `--data-dir PATH` argument uses a separate database for testing.
 
 ## Included
 
@@ -140,12 +140,13 @@ The benchmark generates eight local 1080p/30 H.264 files and profiles 2–4 conc
 
 ## Scope and current limits
 
-- One display GPU handles composition and decoding. The verified renderer on the development machine is the RTX 5090. Multi-GPU scheduling across the 4090/3090 is deferred; hardware decoding falls back to software for unsupported formats.
+- One display GPU handles composition, decoding, and encoding. Export resolves its decode adapter and NVENC device by name from the compositing GPU rather than trusting index 0, which means different cards in FFmpeg's DXGI, NVENC, and NVML orderings. The verified renderer on the development machine is the RTX 5090. Spreading one export across several GPUs is still deferred; hardware decoding falls back to software for unsupported formats.
 - This is an SDR compositor. HDR passthrough, multi-monitor sessions, 3D cubes, and a Windows `.scr` screensaver are deferred.
 - Clip changes open asynchronously on hidden players. mpv players and render contexts are warmed up to two per maximum segment, one on screen and one preparing the next clip, and are reused across layouts, avoiding synchronous player destruction/initialization during ordinary transitions. A prepared clip stays paused and muted until it has a decoded frame and is swapped into the visible segment. Audio handoffs wait for mute acknowledgment before unmuting the next source. There is no audio crossfade yet.
 - Pool warmup can delay initial Play or expansion to a higher capacity. The pool retains up to two players per maximum segment for the highest capacity used during the session, including reusable texture allocations; Stop releases it. The performance panel distinguishes active and idle players. Opening/seeking and driver work can still produce occasional frame gaps.
 - File support depends on the bundled libmpv/FFmpeg build. The extension candidate list is in `src/library.cpp`; corrupt, unsupported, durationless, or too-short files are excluded. Failed playback sources are skipped for the current app session.
 - Folder changes require **Rescan**. Deduplication is by canonical path, not file-content hashing. Folder removal is disabled during a scan.
+- Each library folder has a tick box. Unticking one excludes its videos from playback and export immediately, and rescans then skip it, so files added while it was unticked appear only after it is re-ticked and rescanned. Its indexed rows are kept and are not marked missing. Folders overlap by path prefix, so a video stays in the mix while any folder containing it is ticked.
 - The cache setting controls demuxer cache per decoder, not total RAM. Textures and decoder surfaces use additional memory. Texture downscaling does not reduce source decode resolution.
 - Settings permit up to 32 slots, but that is not a performance guarantee for 32 high-resolution sources. The codec smoke test uses 640×360 fixtures and the transition benchmark uses 2–4 1080p sources; neither is a 32-stream 4K/8K stress benchmark.
 

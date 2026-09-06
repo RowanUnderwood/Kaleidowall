@@ -376,7 +376,13 @@ QWidget* Window::libraryPage() {
     box->addWidget(heading("LIBRARY FOLDERS"));
     folderList = new QListWidget;
     folderList->setMaximumHeight(120);
+    folderList->setToolTip("Untick a folder to exclude it from playback and export.");
     box->addWidget(folderList);
+    connect(folderList, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) {
+        if (rebuildingFolders)
+            return;
+        media->setFolderEnabled(item->data(Qt::UserRole).toString(), item->checkState() == Qt::Checked);
+    });
     addFolderButton = button("Add folder");
     removeFolderButton = button("Remove");
     auto* row = new QHBoxLayout;
@@ -392,7 +398,7 @@ QWidget* Window::libraryPage() {
     });
     connect(removeFolderButton, &QPushButton::clicked, this, [this] {
         if (auto* item = folderList->currentItem())
-            media->removeFolder(item->text());
+            media->removeFolder(item->data(Qt::UserRole).toString());
     });
     scanButton = button("Rescan");
     box->addWidget(scanButton);
@@ -402,7 +408,9 @@ QWidget* Window::libraryPage() {
         else
             media->scan();
     });
-    scanLabel = new QLabel("Folders are scanned recursively. Source files are never moved or deleted.");
+    scanLabel = new QLabel("Folders are scanned recursively. Source files are never moved or deleted. "
+                           "Unticking a folder applies to playback and export at once; rescans skip it "
+                           "from then on.");
     scanLabel->setWordWrap(true);
     scanLabel->setObjectName("muted");
     box->addWidget(scanLabel);
@@ -546,8 +554,20 @@ void Window::refreshPresets() {
     presets->addItems(media->presets());
 }
 void Window::refreshLibrary() {
+    auto folders = media->folders();
+    int enabledFolders = 0;
+    rebuildingFolders = true;
     folderList->clear();
-    folderList->addItems(media->folders());
+    for (const auto& f : folders) {
+        auto* item = new QListWidgetItem(f.path, folderList);
+        item->setData(Qt::UserRole, f.path);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(f.enabled ? Qt::Checked : Qt::Unchecked);
+        item->setForeground(QColor(f.enabled ? "#dce5f2" : "#8293ac"));
+        item->setToolTip(f.enabled ? f.path : f.path + "\nDisabled: excluded from playback and export.");
+        enabledFolders += f.enabled ? 1 : 0;
+    }
+    rebuildingFolders = false;
     rows.clear();
     auto all = media->videos();
     int eligible = 0;
@@ -559,8 +579,12 @@ void Window::refreshLibrary() {
             v.path.contains(query, Qt::CaseInsensitive) || v.codec.contains(query, Qt::CaseInsensitive))
             rows << v;
     }
-    librarySummary->setText(
-        QString("%1 videos · %2 eligible · %3 shown").arg(all.size()).arg(eligible).arg(rows.size()));
+    librarySummary->setText(QString("%1 videos · %2 eligible · %3 shown · %4 of %5 folders enabled")
+                                .arg(all.size())
+                                .arg(eligible)
+                                .arg(rows.size())
+                                .arg(enabledFolders)
+                                .arg(folders.size()));
     videoTable->setRowCount(int(rows.size()));
     for (int i = 0; i < rows.size(); ++i) {
         const auto& v = rows[i];
@@ -595,6 +619,13 @@ void Window::editVideo(int row) {
     auto* enabled = new QCheckBox("Include in shuffle");
     enabled->setChecked(v.enabled);
     box->addWidget(enabled);
+    if (!v.folderEnabled) {
+        auto* parked = new QLabel("This video's folder is unticked, so it stays out of playback and "
+                                  "export regardless of this setting.");
+        parked->setWordWrap(true);
+        parked->setObjectName("muted");
+        box->addWidget(parked);
+    }
     auto* form = new QFormLayout;
     auto* start = number(-1, 86400, " s");
     auto* end = number(-1, 86400, " s");

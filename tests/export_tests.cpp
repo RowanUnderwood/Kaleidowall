@@ -2,6 +2,7 @@
 #include "export_dialog.h"
 #include "export_timeline.h"
 #include "exporter.h"
+#include "gpu.h"
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -198,6 +199,38 @@ class ExportTests : public QObject {
         QCOMPARE(dialog.options.audioMode, 2);
         QVERIFY(std::abs(dialog.options.duration - 3.123) < .0001);
         QCOMPARE(dialog.options.frameCount(), 188);
+    }
+    // FFmpeg addresses GPUs through three disagreeing index spaces, so the export resolves its
+    // device by name. These cover the parsing that resolution rests on; no hardware needed.
+    void nvencDeviceListIsParsedByOrdinal() {
+        const QString log =
+            "[h264_nvenc @ 0000022d] [ GPU #0 - < NVIDIA GeForce RTX 4090 > has Compute SM 8.9 ]\n"
+            "[h264_nvenc @ 0000022d] [ GPU #1 - < NVIDIA GeForce RTX 5090 > has Compute SM 12.0 ]\n"
+            "[h264_nvenc @ 0000022d] [ GPU #2 - < NVIDIA GeForce RTX 3090 > has Compute SM 8.6 ]\n"
+            "[vost#0:0/h264_nvenc @ 0000022d] Error while opening encoder\n";
+        const auto devices = parseNvencDevices(log);
+        QCOMPARE(devices.size(), 3);
+        QCOMPARE(devices[0], QString("NVIDIA GeForce RTX 4090"));
+        QCOMPARE(devices[1], QString("NVIDIA GeForce RTX 5090"));
+        QCOMPARE(devices[2], QString("NVIDIA GeForce RTX 3090"));
+    }
+    void nvencParsingIgnoresUnrelatedOutput() {
+        QVERIFY(parseNvencDevices("Nvenc initialized successfully\nStream #0:0 -> #0:0\n").isEmpty());
+        QVERIFY(parseNvencDevices(QString()).isEmpty());
+    }
+    void rendererNameDropsTheDriverSuffix() {
+        QCOMPARE(normalizeRendererName("NVIDIA GeForce RTX 5090/PCIe/SSE2"),
+                 QString("NVIDIA GeForce RTX 5090"));
+        QCOMPARE(normalizeRendererName("NVIDIA GeForce RTX 5090"), QString("NVIDIA GeForce RTX 5090"));
+        QCOMPARE(normalizeRendererName(QString()), QString());
+    }
+    void unmatchedRendererFallsBackToTheFirstDevice() {
+        // An unknown renderer must still produce usable indices rather than -1.
+        const auto selection = selectExportGpu("Some Unknown Adapter");
+        QCOMPARE(selection.dxgi, 0);
+        QCOMPARE(selection.nvenc, 0);
+        QVERIFY(!selection.decodeMatched);
+        QVERIFY(!selection.encodeMatched);
     }
 };
 QTEST_MAIN(ExportTests)

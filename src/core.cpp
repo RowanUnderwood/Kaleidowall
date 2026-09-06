@@ -111,6 +111,8 @@ static std::pair<double, double> margins(const Video& v, const Settings& s) {
 QString eligibilityReason(const Video& v, const Settings& s) {
     if (!v.enabled)
         return "Excluded";
+    if (!v.folderEnabled)
+        return "Folder disabled";
     if (v.missing)
         return "File missing";
     if (!v.error.isEmpty())
