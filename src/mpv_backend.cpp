@@ -1,5 +1,6 @@
 #include "mpv_backend.h"
 #include <QCoreApplication>
+#include <thread>
 namespace kaleido {
 bool MpvApi::load() {
     library.setFileName(QCoreApplication::applicationDirPath() + "/libmpv-2.dll");
@@ -37,8 +38,17 @@ bool MpvApi::load() {
 Decoder::~Decoder() {
     if (renderer)
         api.render_context_free(renderer);
-    if (handle)
-        api.terminate_destroy(handle);
+    if (!handle)
+        return;
+    // Tearing down a player that opened an audio output leaves libmpv one
+    // CoUninitialize() ahead of its CoInitialize() calls on whichever thread
+    // calls terminate_destroy. On the GUI thread that drains the reference
+    // count Qt holds on the main STA, and once it reaches zero the apartment
+    // is gone: QGuiApplication then faults releasing its own COM and WinRT
+    // objects. Destroy on a scratch thread whose apartment nobody else owns.
+    auto destroy = api.terminate_destroy;
+    auto* dying = handle;
+    std::thread([destroy, dying] { destroy(dying); }).join();
 }
 bool Decoder::init(bool hwdec, int bufferMiB, mpv_opengl_init_params& gl) {
     handle = api.create();

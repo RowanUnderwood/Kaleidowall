@@ -7,6 +7,7 @@ quint64 requestId;
 int writes, rendered;
 uint64_t renderFlags;
 QString sentValue;
+Qt::HANDLE destroyingThread = nullptr;
 int fakeSetProperty(mpv_handle*, uint64_t id, const char*, mpv_format format, void* data) {
     if (format != MPV_FORMAT_STRING)
         return MPV_ERROR_PROPERTY_FORMAT;
@@ -119,6 +120,19 @@ class BackendTests : public QObject {
         event.reply_userdata = 2;
         decoder.handleEvent(event);
         QVERIFY(!decoder.stopPending);
+    }
+    void handleIsDestroyedOffTheCallingThread() {
+        // libmpv leaves a stray CoUninitialize() on whichever thread destroys a
+        // player, which would otherwise dismantle the COM apartment Qt owns on
+        // the GUI thread and fault QGuiApplication's own shutdown.
+        MpvApi api;
+        api.terminate_destroy = [](mpv_handle*) { destroyingThread = QThread::currentThreadId(); };
+        destroyingThread = QThread::currentThreadId();
+        {
+            Decoder decoder(api);
+            decoder.handle = reinterpret_cast<mpv_handle*>(1);
+        }
+        QVERIFY(destroyingThread != QThread::currentThreadId());
     }
 };
 QTEST_GUILESS_MAIN(BackendTests)
