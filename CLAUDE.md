@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Kaleidowall: a native Windows video mosaic player (`Kaleidowall.exe`, C++ namespace `kaleido`). C++20 + Qt 6.8 Widgets, one OpenGL 3.3
-compositor surface, libmpv for decode, FFprobe for metadata, SQLite for the library. No browser runtime, no
-transcoding step. `README.md` documents user-facing behaviour and current scope limits; `PERFORMANCE.md`
+Kaleidowall: a native Windows video mosaic player (`Kaleidowall.exe`, C++ namespace `kaleido`). C++20 + Qt
+6.8 Widgets, one OpenGL 3.3 compositor surface, libmpv for decode, FFprobe for metadata, SQLite for the
+library. No browser runtime, no transcoding step. `README.md` documents user-facing behaviour and current scope limits; `PERFORMANCE.md`
 records the transition-stall investigation and the measured before/after numbers.
 
 ## Commands
@@ -32,6 +32,9 @@ python scripts/smoke_test.py                                 # real UI, generate
 python scripts/orientation_test.py                           # vertical-flip regression, real player
 python scripts/benchmark.py --label local60 --fps 60         # transition/frame-pacing profile
 ```
+
+All three Python validators currently fail their exit-code gate, not their assertions — see
+**Known issue: crash on shutdown** below before treating a failure there as a regression.
 
 The Python scripts need `ffmpeg`/`ffprobe` on PATH and a built `build/Release/Kaleidowall.exe`; they
 prepend `.deps/Qt/6.8.3/msvc2022_64/bin` to PATH themselves. `ctest` and the test executables do not —
@@ -111,3 +114,37 @@ settings clamping, and database persistence via `kaleido_core` + `QTemporaryDir`
 (`kaleido_backend`) compiles `mpv_backend.cpp` directly and drives it with fake mpv function pointers —
 mute-acknowledgment ordering, stale/failed replies, redundant-write suppression, texture reuse, stop
 acknowledgment. New backend behaviour should be reachable this way rather than only through the GUI.
+
+## Known issue: crash on shutdown (open, not yet investigated)
+
+**Status: TODO, deferred by the maintainer on 2026-09-06.** Known and accepted for now — do not treat it as
+a fresh regression, and do not start fixing it unless asked.
+
+`Kaleidowall.exe` reliably segfaults (`0xC0000005`, exit `3221225477` unsigned / `-1073741819` signed) while
+exiting. It happens *after* the scripted session finishes and every screenshot, `smoke.json`, and
+`benchmark.json` has been flushed, so nothing is lost and normal interactive use looks fine — the window
+closes and the crash is silent unless a shell reports the exit code.
+
+What this breaks: `smoke_test.py` raises on `result.returncode`, and `orientation_test.py` /
+`benchmark.py` pass `check=True`, so all three fail even when the run itself was good. Judge those runs by
+their saved telemetry, not the exit status: on the last verified run every one of `smoke_test.py`'s
+behavioural assertions passed when replayed against `smoke.json` (concurrent playback, layout changes,
+pause/resume, exclusive audio, clip exclusions, single-video retirement, 17 clean cuts).
+
+Established so far (2026-09-06):
+
+- Not caused by the Kaleidowall rename. Commit `84b6f8f` (the pre-rename tree) was built in a separate git
+  worktree and crashes identically, same code, every run.
+- Reproduces on every exit, 6+ consecutive runs, launched from Python `subprocess`, Git Bash, and .NET
+  `Process`. Independent of stdio redirection (inherited handles, a log file, and `DEVNULL` all crash).
+- `Start-Process -PassThru -Wait` reports `ExitCode 0` for these same crashing runs. Do not trust it here;
+  use `subprocess.run`, bash `$?`, or `System.Diagnostics.Process` to measure the exit code.
+- `app.log` is empty and `diagnostics()["error"]` is `""`, so neither Qt nor mpv reports anything first.
+
+Where to look next: the teardown chain is `~Window` (`delete takeCentralWidget()` → `~Canvas`, then
+`delete media`) → `~Canvas` (`makeCurrent`, `clearSlots`, delete GL objects, `doneCurrent`) → `~Decoder`
+(`render_context_free`, then `terminate_destroy`) → `~Library` (cancel flag, `worker->quit()`/`wait()`).
+Prime suspects are mpv render-context/handle teardown ordering against the `QOpenGLWidget` context
+lifetime, and pool slots (`players`/`spares`) whose decoders still have an async stop or property write
+outstanding. A debug build with a stack trace should pin it down quickly; nothing here has been ruled out
+yet.
