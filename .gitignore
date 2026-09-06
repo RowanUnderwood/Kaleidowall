@@ -1,0 +1,9 @@
+.deps/
+.venv/
+build/
+dist/
+test-output/
+__pycache__/
+aqtinstall.log
+*.user
+feature ideas.txt
