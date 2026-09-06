@@ -17,6 +17,6 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
 }
 if ($Deploy) {
-    & "$qtPath\bin\windeployqt.exe" --release --no-translations --no-opengl-sw build\Release\PrismPlayer.exe
+    & "$qtPath\bin\windeployqt.exe" --release --no-translations --no-opengl-sw build\Release\Kaleidowall.exe
     if ($LASTEXITCODE -ne 0) { throw 'Qt deployment failed' }
 }

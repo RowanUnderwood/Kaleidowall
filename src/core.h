@@ -7,7 +7,7 @@
 #include <optional>
 #include <random>
 
-namespace prism {
+namespace kaleido {
 struct Settings {
     int minSlots = 2, maxSlots = 6;
     double clipMin = 12, clipMax = 35, layoutMin = 15, layoutMax = 30, transition = 1.4;
@@ -61,4 +61,4 @@ class ShuffleBag {
 QVector<QRectF> makeLayout(const QString& mode, int count, double aspect, std::mt19937&);
 QString pickMode(const Settings&, std::mt19937&, const QString& previous = {});
 double randomRange(std::mt19937&, double low, double high);
-} // namespace prism
+} // namespace kaleido

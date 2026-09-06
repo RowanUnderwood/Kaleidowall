@@ -1,6 +1,6 @@
 #include "mpv_backend.h"
 #include <QCoreApplication>
-namespace prism {
+namespace kaleido {
 bool MpvApi::load() {
     library.setFileName(QCoreApplication::applicationDirPath() + "/libmpv-2.dll");
     if (!library.load()) {
@@ -59,7 +59,7 @@ bool Decoder::init(bool hwdec, int bufferMiB, mpv_opengl_init_params& gl) {
     option("idle", "yes");
     option("keep-open-pause", "no");
     option("mute", "yes");
-    option("audio-client-name", "Prism Player");
+    option("audio-client-name", "Kaleidowall");
     option("sub-visibility", "no");
     option("demuxer-max-bytes", QByteArray::number(qint64(bufferMiB) * 1024 * 1024));
     option("demuxer-max-back-bytes", "0");
@@ -183,4 +183,4 @@ bool Decoder::render(int fbo, int w, int h, bool force) {
         error = QString::fromUtf8(api.error_string(result));
     return result >= 0;
 }
-} // namespace prism
+} // namespace kaleido

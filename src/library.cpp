@@ -11,7 +11,7 @@
 #include <QStandardPaths>
 #include <QUuid>
 
-namespace prism {
+namespace kaleido {
 static QString canonical(const QString& path) {
     QFileInfo f(path);
     auto p = f.canonicalFilePath();
@@ -289,4 +289,4 @@ void Library::scan() {
 void Library::cancelScan() {
     canceled = true;
 }
-} // namespace prism
+} // namespace kaleido

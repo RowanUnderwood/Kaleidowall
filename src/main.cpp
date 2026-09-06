@@ -16,8 +16,8 @@ int main(int argc, char** argv) {
     format.setDepthBufferSize(0);
     QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc, argv);
-    QApplication::setApplicationName("PrismPlayer");
-    QApplication::setOrganizationName("Prism");
+    QApplication::setApplicationName("Kaleidowall");
+    QApplication::setOrganizationName("Kaleidowall");
     QCommandLineParser args;
     args.addHelpOption();
     args.addOption({"data-dir", "Override application data directory", "path"});
@@ -29,13 +29,13 @@ int main(int argc, char** argv) {
     auto data = args.value("data-dir");
     if (data.isEmpty())
         data = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    prism::Window window(data);
+    kaleido::Window window(data);
     window.show();
     QJsonArray samples;
     QTimer sampleTimer;
     QTimer benchmarkEnd;
     if (args.isSet("benchmark")) {
-        prism::Settings s;
+        kaleido::Settings s;
         s.minSlots = 2;
         s.maxSlots = 4;
         s.clipMin = 3;
@@ -67,12 +67,12 @@ int main(int argc, char** argv) {
             benchmarkEnd.start(std::max(15, args.value("benchmark").toInt()) * 1000);
         };
         if (args.isSet("library"))
-            QObject::connect(window.library(), &prism::Library::scanFinished, &window, start);
+            QObject::connect(window.library(), &kaleido::Library::scanFinished, &window, start);
         else
             QTimer::singleShot(500, &window, start);
     }
     if (args.isSet("smoke")) {
-        prism::Settings s;
+        kaleido::Settings s;
         s.minSlots = 2;
         s.maxSlots = 4;
         s.clipMin = 2;
@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
             QTimer::singleShot(22000, &window, [&] { window.grab().save(data + "/smoke-single.png"); });
         };
         if (args.isSet("library"))
-            QObject::connect(window.library(), &prism::Library::scanFinished, &window, start);
+            QObject::connect(window.library(), &kaleido::Library::scanFinished, &window, start);
         else
             QTimer::singleShot(1000, &window, start);
         int seconds = std::max(12, args.value("smoke").toInt());

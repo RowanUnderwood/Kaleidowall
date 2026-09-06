@@ -30,7 +30,7 @@ run.mkdir()
 env = os.environ.copy()
 env['PATH'] = str(ROOT / '.deps/Qt/6.8.3/msvc2022_64/bin') + os.pathsep + env['PATH']
 with (run / 'app.log').open('w') as log:
-    subprocess.run([str(ROOT/'build/Release/PrismPlayer.exe'), '--data-dir', str(run),
+    subprocess.run([str(ROOT/'build/Release/Kaleidowall.exe'), '--data-dir', str(run),
                     '--library', str(media), '--benchmark', str(args.seconds), '--benchmark-fps', str(args.fps)],
                     env=env, stdout=log, stderr=log, check=True, timeout=args.seconds+60)
 report = json.loads((run/'benchmark.json').read_text())

@@ -13,7 +13,7 @@
 #include <memory>
 #include <vector>
 
-namespace prism {
+namespace kaleido {
 class Canvas : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
     Q_OBJECT
   public:
@@ -121,4 +121,4 @@ class Canvas : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
     int cleanCuts = 0, delayedCuts = 0;
     double lastCutDelay = 0, lastPreloadMs = 0;
 };
-} // namespace prism
+} // namespace kaleido

@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace prism {
+namespace kaleido {
 static int maskFor(const QString& s) {
     return s == "Circles" ? 1 : s == "Hexagons" ? 2 : 0;
 }
@@ -891,4 +891,4 @@ void Canvas::mouseMoveEvent(QMouseEvent* e) {
 void Canvas::mouseDoubleClickEvent(QMouseEvent*) {
     emit fullscreenRequested();
 }
-} // namespace prism
+} // namespace kaleido

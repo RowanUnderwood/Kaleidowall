@@ -1,6 +1,6 @@
 #include "mpv_backend.h"
 #include <QtTest>
-using namespace prism;
+using namespace kaleido;
 
 namespace {
 quint64 requestId;

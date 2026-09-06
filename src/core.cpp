@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace prism {
+namespace kaleido {
 double randomRange(std::mt19937& r, double a, double b) {
     return std::uniform_real_distribution<double>(a, std::max(a, b))(r);
 }
@@ -243,4 +243,4 @@ QVector<QRectF> makeLayout(const QString& mode, int n, double aspect, std::mt199
     }
     return result;
 }
-} // namespace prism
+} // namespace kaleido

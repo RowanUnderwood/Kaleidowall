@@ -1,16 +1,16 @@
-# Prism Player
+# Kaleidowall
 
 A native Windows video mosaic player built with C++20, Qt 6 Widgets, an OpenGL 3.3 compositor, libmpv, FFprobe, and SQLite. The first version focuses on 2D playback. There is no browser runtime or video transcoding step.
 
 ## Run on this machine
 
-Double-click **`build/Release/PrismPlayer.exe`**, or run `./Start-Prism.ps1` in PowerShell.
+Double-click **`build/Release/Kaleidowall.exe`**, or run `./Start-Kaleidowall.ps1` in PowerShell.
 
 1. Open **Library → Add folder**. Scanning is recursive and runs in the background.
 2. Choose a preset or adjust settings, then select **Apply settings**.
 3. Press **Play**. Use **F11** or double-click the player for fullscreen.
 
-The source files stay where they are. Removing a library folder only removes its index entries. The app stores its database, presets, settings, and shuffle position in `%LOCALAPPDATA%/Prism/PrismPlayer`. A `--data-dir PATH` argument uses a separate database for testing.
+The source files stay where they are. Removing a library folder only removes its index entries. The app stores its database, presets, settings, and shuffle position in `%LOCALAPPDATA%/Kaleidowall/Kaleidowall`. A `--data-dir PATH` argument uses a separate database for testing.
 
 ## Included
 

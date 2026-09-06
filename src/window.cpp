@@ -13,7 +13,7 @@
 #include <QStatusBar>
 #include <QVBoxLayout>
 
-namespace prism {
+namespace kaleido {
 static QPushButton* button(const QString& text) {
     auto* b = new QPushButton(text);
     b->setCursor(Qt::PointingHandCursor);
@@ -47,7 +47,7 @@ static QSpinBox* integer(int lo, int hi) {
     return b;
 }
 Window::Window(const QString& dataDir) {
-    setWindowTitle("Prism — Random Video Player");
+    setWindowTitle("Kaleidowall — Random Video Player");
     resize(1440, 900);
     setMinimumSize(960, 640);
     QDir().mkpath(dataDir);
@@ -87,7 +87,7 @@ Window::Window(const QString& dataDir) {
     )");
     header = addToolBar("Navigation");
     header->setMovable(false);
-    auto* brand = new QLabel("◈  PRISM");
+    auto* brand = new QLabel("◈  KALEIDOWALL");
     brand->setObjectName("brand");
     header->addWidget(brand);
     auto* tag = new QLabel("  A new perspective on your library");
@@ -632,4 +632,4 @@ void Window::closeEvent(QCloseEvent* event) {
     player->stop();
     QMainWindow::closeEvent(event);
 }
-} // namespace prism
+} // namespace kaleido

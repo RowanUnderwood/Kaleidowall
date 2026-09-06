@@ -16,7 +16,7 @@
 #include <QTextEdit>
 #include <QToolBar>
 
-namespace prism {
+namespace kaleido {
 class Window : public QMainWindow {
     Q_OBJECT
   public:
@@ -71,4 +71,4 @@ class Window : public QMainWindow {
     QVector<Video> rows;
     bool syncing = false;
 };
-} // namespace prism
+} // namespace kaleido

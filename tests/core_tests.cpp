@@ -3,7 +3,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtTest>
-using namespace prism;
+using namespace kaleido;
 class CoreTests : public QObject {
     Q_OBJECT
   private slots:

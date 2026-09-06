@@ -10,7 +10,7 @@ DEST = ROOT / '.deps' / 'mpv'
 DEST.mkdir(parents=True, exist_ok=True)
 
 def fetch(url):
-    req = urllib.request.Request(url, headers={'User-Agent': 'PrismPlayer-dev-setup'})
+    req = urllib.request.Request(url, headers={'User-Agent': 'Kaleidowall-dev-setup'})
     with urllib.request.urlopen(req, timeout=120) as response:
         return response.read()
 

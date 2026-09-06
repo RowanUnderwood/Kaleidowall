@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Prism Player (`PrismPlayer`): a native Windows video mosaic player. C++20 + Qt 6.8 Widgets, one OpenGL 3.3
+Kaleidowall: a native Windows video mosaic player (`Kaleidowall.exe`, C++ namespace `kaleido`). C++20 + Qt 6.8 Widgets, one OpenGL 3.3
 compositor surface, libmpv for decode, FFprobe for metadata, SQLite for the library. No browser runtime, no
 transcoding step. `README.md` documents user-facing behaviour and current scope limits; `PERFORMANCE.md`
 records the transition-stall investigation and the measured before/after numbers.
@@ -17,25 +17,28 @@ All commands run from the repo root in PowerShell.
 ./scripts/setup.ps1                 # one-time: .venv, Qt 6.8.3 via aqtinstall, libmpv, then a test build
 ./scripts/build.ps1                 # configure + build Release (VS 2022 x64), copy libmpv-2.dll
 ./scripts/build.ps1 -Test -Deploy   # also run ctest and windeployqt
-./Start-Prism.ps1                   # run build/Release/PrismPlayer.exe with Qt on PATH
+./Start-Kaleidowall.ps1                   # run build/Release/Kaleidowall.exe with Qt on PATH
 ```
 
 Tests and validation:
 
 ```powershell
-ctest --test-dir build -C Release --output-on-failure       # both suites
-ctest --test-dir build -C Release -R prism_backend          # one suite (prism_core | prism_backend)
-build\Release\prism_tests.exe clipNeverCrossesMargins       # one QtTest function
-build\Release\prism_tests.exe -functions                    # list test functions
-python scripts/smoke_test.py                               # real UI, generated multi-codec fixtures
-python scripts/orientation_test.py                         # vertical-flip regression through the real player
-python scripts/benchmark.py --label local60 --fps 60        # transition/frame-pacing profile
+$env:PATH = "$PWD\.deps\Qt\6.8.3\msvc2022_64\bin;$env:PATH"  # required by the ctest lines below
+ctest --test-dir build -C Release --output-on-failure        # both suites
+ctest --test-dir build -C Release -R kaleido_backend         # one suite (kaleido_core | kaleido_backend)
+build\Release\kaleido_tests.exe clipNeverCrossesMargins      # one QtTest function
+build\Release\kaleido_tests.exe -functions                   # list test functions
+python scripts/smoke_test.py                                 # real UI, generated multi-codec fixtures
+python scripts/orientation_test.py                           # vertical-flip regression, real player
+python scripts/benchmark.py --label local60 --fps 60         # transition/frame-pacing profile
 ```
 
-The Python scripts need `ffmpeg`/`ffprobe` on PATH and a built `build/Release/PrismPlayer.exe`; they prepend
-`.deps/Qt/6.8.3/msvc2022_64/bin` to PATH themselves. `prism_tests.exe` run directly needs that Qt `bin` on
-PATH (ctest and `build.ps1` handle it). Output, fixtures, and JSON/PNG telemetry land under `test-output/`
-(gitignored). Formatting is `.clang-format` (LLVM base, 4 spaces, 110 columns).
+The Python scripts need `ffmpeg`/`ffprobe` on PATH and a built `build/Release/Kaleidowall.exe`; they
+prepend `.deps/Qt/6.8.3/msvc2022_64/bin` to PATH themselves. `ctest` and the test executables do not —
+only `build.ps1 -Test` sets PATH before invoking ctest, so a standalone `ctest` run fails every test with
+`0xc0000135` (DLL not found) unless that Qt `bin` is on PATH first. Output, fixtures, and JSON/PNG
+telemetry land under `test-output/` (gitignored). Formatting is `.clang-format` (LLVM base, 4 spaces,
+110 columns).
 
 Dependencies live in `.deps/` — nothing is installed system-wide. Qt is pinned to 6.8.3 and the libmpv
 archive URL/SHA-256 to `dependencies.lock.json`; `scripts/dependencies.py` verifies the hash before
@@ -48,7 +51,7 @@ that owns all playback) → `Decoder`/`MpvApi` (libmpv) and `Library` (SQLite + 
 
 - **`src/core.*`** — pure, Qt-Core-only logic: `Settings` (JSON round-trip + `normalize()` clamping),
   `chooseClip`/`eligibilityReason` (skip margins, per-video overrides, percentage mode), `ShuffleBag`,
-  `makeLayout`/`pickMode`. Deliberately free of GUI/GL/mpv dependencies so `prism_core` links into tests.
+  `makeLayout`/`pickMode`. Deliberately free of GUI/GL/mpv dependencies so `kaleido_core` links into tests.
 - **`src/library.*`** — one SQLite file (`folders`, `videos`, `kv`) in WAL mode. `kv` stores settings,
   shuffle state, and `preset:<name>` rows. Scanning runs on a `QThread::create` worker that shells out to
   FFprobe per file and marshals each result back with `QMetaObject::invokeMethod(..., QueuedConnection)`;
@@ -103,8 +106,8 @@ so benchmark runs are comparable, and `recordTiming` stages (`tick`, `layout`, `
 
 ### Test layout
 
-`tests/core_tests.cpp` (`prism_core`) covers clip bounds, shuffle/reservation semantics, layout coverage,
-settings clamping, and database persistence via `prism_core` + `QTemporaryDir`. `tests/backend_tests.cpp`
-(`prism_backend`) compiles `mpv_backend.cpp` directly and drives it with fake mpv function pointers —
+`tests/core_tests.cpp` (`kaleido_core`) covers clip bounds, shuffle/reservation semantics, layout coverage,
+settings clamping, and database persistence via `kaleido_core` + `QTemporaryDir`. `tests/backend_tests.cpp`
+(`kaleido_backend`) compiles `mpv_backend.cpp` directly and drives it with fake mpv function pointers —
 mute-acknowledgment ordering, stale/failed replies, redundant-write suppression, texture reuse, stop
 acknowledgment. New backend behaviour should be reachable this way rather than only through the GUI.

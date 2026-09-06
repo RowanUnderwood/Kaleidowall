@@ -5,7 +5,7 @@
 #include <QThread>
 #include <atomic>
 
-namespace prism {
+namespace kaleido {
 class Library : public QObject {
     Q_OBJECT
   public:
@@ -40,4 +40,4 @@ class Library : public QObject {
     QThread* worker = nullptr;
     std::atomic_bool canceled = false;
 };
-} // namespace prism
+} // namespace kaleido

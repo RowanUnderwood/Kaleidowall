@@ -6,7 +6,7 @@
 #include <mpv/client.h>
 #include <mpv/render_gl.h>
 
-namespace prism {
+namespace kaleido {
 class MpvApi {
   public:
     bool load();
@@ -58,4 +58,4 @@ class Decoder {
     QHash<QString, QString> requested;
     quint64 nextRequest = 100, muteRequest = 0;
 };
-} // namespace prism
+} // namespace kaleido
