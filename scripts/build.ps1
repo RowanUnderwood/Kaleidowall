@@ -33,4 +33,8 @@ if ($Test) {
 if ($Deploy) {
     & "$qtPath\bin\windeployqt.exe" --release --no-translations --no-opengl-sw (Join-Path $releaseDirectory 'Kaleidowall.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Qt deployment failed' }
+    # The .scr and .exe link the same shared app library and use this one deployed runtime directory.
+    if (!(Test-Path -LiteralPath (Join-Path $releaseDirectory 'Kaleidowall.scr'))) {
+        throw 'Screensaver target missing from the build.'
+    }
 }

@@ -1,0 +1,5 @@
+1 ICON "kaleidowall.ico"
+STRINGTABLE
+BEGIN
+    1 "Kaleidowall"
+END

@@ -50,7 +50,7 @@ Decoder::~Decoder() {
     auto* dying = handle;
     std::thread([destroy, dying] { destroy(dying); }).join();
 }
-bool Decoder::init(bool hwdec, int bufferMiB, mpv_opengl_init_params& gl) {
+bool Decoder::init(bool hwdec, int bufferMiB, mpv_opengl_init_params& gl, bool inhibitScreensaver) {
     handle = api.create();
     if (!handle) {
         error = "Cannot create libmpv instance";
@@ -63,6 +63,7 @@ bool Decoder::init(bool hwdec, int bufferMiB, mpv_opengl_init_params& gl) {
     option("terminal", "no");
     option("input-default-bindings", "no");
     option("input-vo-keyboard", "no");
+    option("stop-screensaver", inhibitScreensaver ? "yes" : "no");
     option("vo", "libmpv");
     option("hwdec", hwdec ? "auto-safe" : "no");
     option("keep-open", "yes");

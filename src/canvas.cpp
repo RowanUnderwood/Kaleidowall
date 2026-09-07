@@ -11,11 +11,15 @@
 #include <cmath>
 
 namespace kaleido {
-Canvas::Canvas(Library* lib, QWidget* parent) : QOpenGLWidget(parent), library(lib) {
+Canvas::Canvas(Library* lib, QWidget* parent, CanvasOptions canvasOptions)
+    : QOpenGLWidget(parent), library(lib), sessionOptions(canvasOptions) {
     setMinimumSize(320, 240);
     setMouseTracking(true);
-    config = Settings::fromJson(library->value("settings"));
-    bag.restore(library->value("shuffle"));
+    config = sessionOptions.screensaver ? library->startupSettings() : Settings::fromJson(library->value("settings"));
+    if (sessionOptions.forceMute)
+        config.muted = true;
+    if (!sessionOptions.shuffleKey.isEmpty())
+        bag.restore(library->value(sessionOptions.shuffleKey));
     reloadLibrary();
     connect(library, &Library::changed, this, &Canvas::reloadLibrary);
     clock.start();
@@ -36,6 +40,11 @@ Canvas::~Canvas() {
     timer.stop();
     persistShuffle();
     makeCurrent();
+    if (initialized) {
+        finishMirrorReads();
+        if (frameFence)
+            glDeleteSync(frameFence);
+    }
     clearSlots();
     if (initialized) {
         compositor.release();
@@ -72,11 +81,14 @@ void Canvas::applySettings(const Settings& s) {
                               s.modes != config.modes || s.weights != config.weights ||
                               s.reducedMotion != config.reducedMotion || s.duplicates != config.duplicates;
     config = s;
+    if (sessionOptions.forceMute)
+        config.muted = true;
     config.normalize();
     nextTickAt = wallSeconds() + 1.0 / config.fps;
     timer.setInterval(std::chrono::nanoseconds(1000000000 / config.fps));
     timer.start();
-    library->setValue("settings", config.json());
+    if (sessionOptions.persistSettings)
+        library->setValue("settings", config.json());
     for (auto& slot : players) {
         slot->decoder->set("hwdec", config.hwdec ? "auto-safe" : "no");
         slot->decoder->set("demuxer-max-bytes", QString::number(qint64(config.bufferMiB) * 1024 * 1024));
@@ -98,10 +110,11 @@ void Canvas::applySettings(const Settings& s) {
 void Canvas::setAudio(bool muted, int volume) {
     if (exportLocked)
         return;
-    config.muted = muted;
+    config.muted = sessionOptions.forceMute || muted;
     config.volume = std::clamp(volume, 0, 100);
     routeAudio();
-    library->setValue("settings", config.json());
+    if (sessionOptions.persistSettings)
+        library->setValue("settings", config.json());
 }
 void Canvas::reloadLibrary() {
     videos.clear();
@@ -126,7 +139,8 @@ void Canvas::reloadLibrary() {
     update();
 }
 void Canvas::persistShuffle() {
-    library->setValue("shuffle", bag.json());
+    if (!sessionOptions.shuffleKey.isEmpty())
+        library->setValue(sessionOptions.shuffleKey, bag.json());
 }
 void Canvas::playPause() {
     if (exportLocked)
@@ -165,6 +179,8 @@ void Canvas::stop() {
     if (exportLocked)
         return;
     makeCurrent();
+    if (initialized)
+        finishMirrorReads();
     clearSlots();
     doneCurrent();
     running = false;
@@ -215,7 +231,7 @@ void Canvas::warmPool(int count) {
         gl.get_proc_address = [](void*, const char* name) -> void* {
             return reinterpret_cast<void*>(QOpenGLContext::currentContext()->getProcAddress(name));
         };
-        if (!slot->decoder->init(config.hwdec, config.bufferMiB, gl)) {
+        if (!slot->decoder->init(config.hwdec, config.bufferMiB, gl, !sessionOptions.screensaver)) {
             lastError = slot->decoder->error;
             emit status(lastError);
             break;
@@ -625,6 +641,7 @@ void Canvas::resizeGL(int w, int h) {
 void Canvas::paintGL() {
     if (!initialized)
         return;
+    finishMirrorReads();
     QElapsedTimer elapsed;
     elapsed.start();
     const double paintAt = clock.nsecsElapsed() / 1e6;
@@ -661,14 +678,8 @@ void Canvas::paintGL() {
     }
     cutPreparedClips();
     const QColor background(config.backgroundColor);
-    std::vector<DrawTile> tiles;
     const double t = progress();
-    for (const auto& s : players)
-        if (s->fbo && s->hasFrame)
-            tiles.push_back({s->fbo->texture(),
-                             QSize(std::max(1, s->displayWidth), std::max(1, s->displayHeight)),
-                             rectangle(*s), float(s->opacityFrom * (1 - t) + s->opacityTarget * t),
-                             0, s.get() == players.front().get()});
+    const auto tiles = drawTiles();
     if (available)
         compositor.draw(defaultFramebufferObject(), QSize(w, h), size(), background, config.crop, fromMask,
                         targetMask, float(t), tiles);
@@ -679,7 +690,7 @@ void Canvas::paintGL() {
     }
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
-    if (players.empty()) {
+    if (players.empty() && !sessionOptions.screensaver) {
         painter.fillRect(rect(), background);
         const bool lightBackground =
             background.redF() * .2126 + background.greenF() * .7152 + background.blueF() * .0722 > .5;
@@ -718,9 +729,38 @@ void Canvas::paintGL() {
         painter.drawText(QRect(width() / 2 - 60, 24, 120, 36), Qt::AlignCenter, "PAUSED");
     }
     painter.end();
+    if (mirrored) {
+        if (frameFence)
+            glDeleteSync(frameFence);
+        frameFence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        glFlush();
+        emit frameReady();
+    }
     paintMs = elapsed.nsecsElapsed() / 1e6;
     recordTiming("paint", paintMs);
     ++frames;
+}
+void Canvas::finishMirrorReads() {
+    for (auto fence : mirrorReaders) {
+        glWaitSync(fence, 0, GL_TIMEOUT_IGNORED);
+        glDeleteSync(fence);
+    }
+    mirrorReaders.clear();
+}
+std::vector<DrawTile> Canvas::drawTiles() const {
+    std::vector<DrawTile> tiles;
+    const double t = progress();
+    for (const auto& s : players)
+        if (s->fbo && s->hasFrame)
+            tiles.push_back({s->fbo->texture(),
+                             QSize(std::max(1, s->displayWidth), std::max(1, s->displayHeight)),
+                             rectangle(*s), float(s->opacityFrom * (1 - t) + s->opacityTarget * t),
+                             0, s.get() == players.front().get()});
+    return tiles;
+}
+void Canvas::renderMirror(Compositor& renderer, GLuint target, QSize pixels) {
+    renderer.draw(target, pixels, size(), QColor(config.backgroundColor), config.crop,
+                  fromMask, targetMask, float(progress()), drawTiles());
 }
 void Canvas::recordTiming(const QString& stage, double ms) {
     if (stage == "tick")

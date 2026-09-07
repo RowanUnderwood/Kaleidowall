@@ -14,6 +14,43 @@ You can also double-click the executable in that build folder.
 
 The source files stay where they are. Removing a library folder only removes its index entries; unticking one keeps them. The app stores its database, presets, settings, and shuffle position in `%LOCALAPPDATA%/Kaleidowall/Kaleidowall`. A `--data-dir PATH` argument uses a separate database for testing.
 
+## Windows screensaver
+
+One build produces **`build/Release/Kaleidowall.exe`** and **`build/Release/Kaleidowall.scr`** from the
+same playback, layout, settings, library, preset and export code. Build and deploy their shared runtime:
+
+```powershell
+./scripts/build.ps1 -Test -Deploy
+./scripts/install-screensaver.ps1
+```
+
+Installation is per-user under `%LOCALAPPDATA%/Kaleidowall/Screensaver`; Windows Screen Saver Settings
+opens so you can select the idle timeout and sign-in-on-resume behavior. Run the installer again after
+rebuilding to update that installed copy. The `.scr` must stay beside its deployed Qt/libmpv DLLs.
+Close Screen Saver Settings before updating so its preview releases the installed files. The installer
+registers the exact unquoted path and activates it through Windows; it does not change the wait time or
+sign-in preference. `-NoOpenSettings` performs the installation without opening Control Panel.
+`./scripts/uninstall-screensaver.ps1` removes this installation and restores the prior screensaver
+selection if Kaleidowall is still selected. It preserves the shared library and presets.
+
+The Settings button opens configuration-only Settings and Library panels shared with the player,
+including scanning, exclusions and preset management. Changes affect subsequent sessions. Playback
+starts from the saved default preset, or last-used settings if no default exists. A screensaver-only
+mute preference defaults on; turning it off follows the shared preset's audio setting. The miniature
+preview is always silent and never consumes shuffle progress. Full-screen screensaver shuffle progress
+is separate from the player, with one screensaver session per data directory.
+
+Every monitor shows the same mosaic from one decoder/audio pool. Monitors with different proportions
+fit that mosaic with black outer borders. Input dismisses all screensaver windows; a monitor topology
+change also ends the session. Windows manages the idle timeout and sign-in; Kaleidowall does not change
+those policies or prevent the screensaver display from sleeping. Empty/unavailable libraries show the
+configured background without blocking dialogs; open Settings → Library to fix the source selection.
+
+Windows launch modes are `/s` (full screen), `/c[:HWND]` (configuration), and `/p HWND` (embedded preview).
+No arguments opens configuration. All modes accept `--data-dir PATH` for an isolated test library.
+`python scripts/screensaver_test.py` tests mirroring, state isolation, configuration and input dismissal
+with generated media; the `kaleido_screensaver` CTest also validates native preview embedding/lifetime.
+
 ## Included
 
 - One to 32 concurrent playback slots, capped by eligible library size unless duplicates are enabled.

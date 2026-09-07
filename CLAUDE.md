@@ -56,6 +56,37 @@ The ICO contains 16, 20, 24, 32, 40, 48, 64, 96, 128 and 256 px variants with tr
 
 ## Architecture
 
+### Shared player and Windows screensaver
+
+`kaleido_app` compiles Canvas, the mpv backend, Window and its settings/library/preset/export panels once.
+Both `Kaleidowall.exe` and `Kaleidowall.scr` link it. The screensaver branch is `codex/screensaver`; keep
+features in shared libraries, never copied into the screensaver entry point. `screensaver_main.cpp`
+sets the same application/organization names and data path as the player. `screensaver.*` implements
+the case-insensitive `/s`, `/c[:HWND]`, `/p HWND` protocol, native preview parenting/lifetime, config owner
+modality, input dismissal, per-data-directory session lock and monitor handling.
+
+`Window(data, true)` presents the same settings/library widgets as a configuration-only central panel.
+Its hidden Canvas uses no shuffle key, and must be explicitly deleted before the Library. Normal
+screensaver Canvas uses `screensaverShuffle`, startup default settings, and no settings writes; preview
+uses no shuffle key and forces mute. `screensaverPreferences.muted` is separate from shared Settings.
+`Library::startupSettings` implements default-preset / last-used fallback. Empty libraries stay quiet.
+
+Mirrors are QOpenGLWidgets sharing decoder textures via `AA_ShareOpenGLContexts`; only the primary
+Canvas schedules/decodes/audio-routes. Both use `Canvas::drawTiles` and the same Compositor. Fit each
+mirror to the primary aspect ratio. GL fences order primary texture writes and mirror reads; flush
+producer contexts, wait on the GPU, and destroy mirrors before Canvas. No CPU frame readbacks on the
+normal mirror path. Screensaver decoders set `stop-screensaver=no` so they do not inhibit screen sleep.
+
+`build.ps1 -Test -Deploy` emits both launchers with a shared deployed runtime. Install/remove scripts
+operate on the separate per-user Screensaver directory, preserving the shared application database.
+Register `SCRNSAVE.EXE` as the exact unquoted absolute path, activate through SystemParametersInfo,
+and open Control Panel separately. Do not pass a quoted path to `desk.cpl,InstallScreenSaver`: it can
+persist quotes plus trailing whitespace, making Settings, Preview and idle launch silently fail.
+`kaleido_screensaver` tests arguments, persistence isolation, config lifetime and real Win32 child
+preview. `scripts/screensaver_test.py` covers real decoding, mirrored screenshots and input dismissal.
+
+### Player components
+
 `main.cpp` → `Window` (Qt Widgets chrome, dock panels, shortcuts) → `Canvas` (the single `QOpenGLWidget`
 that owns all playback) → `Decoder`/`MpvApi` (libmpv) and `Library` (SQLite + FFprobe).
 

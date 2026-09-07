@@ -46,13 +46,13 @@ static QSpinBox* integer(int lo, int hi) {
     b->setRange(lo, hi);
     return b;
 }
-Window::Window(const QString& dataDir) {
+Window::Window(const QString& dataDir, bool configureSaver) : configurationOnly(configureSaver) {
     setWindowTitle("Kaleidowall — Random Video Player");
     resize(1440, 900);
     setMinimumSize(960, 640);
     QDir().mkpath(dataDir);
     media = new Library(dataDir + "/library.sqlite", this);
-    player = new Canvas(media, this);
+    player = new Canvas(media, this, configureSaver ? CanvasOptions{QString(), true, false, false} : CanvasOptions{});
     canvasStack = new QStackedWidget;
     canvasStack->addWidget(player);
     exportPreview = new QLabel("Preparing export…");
@@ -198,6 +198,8 @@ Window::Window(const QString& dataDir) {
         refreshLibrary();
     });
     auto shortcut = [this](const QString& key, auto action) {
+        if (configurationOnly)
+            return;
         auto* s = new QShortcut(QKeySequence(key), this);
         connect(s, &QShortcut::activated, this, action);
     };
@@ -231,6 +233,23 @@ Window::Window(const QString& dataDir) {
     initializePresets();
     syncSettings();
     refreshLibrary();
+    if (configurationOnly) {
+        setWindowTitle("Kaleidowall Screensaver Settings");
+        auto* hiddenCanvas = takeCentralWidget();
+        hiddenCanvas->setParent(this);
+        hiddenCanvas->hide();
+        panels->setParent(this);
+        removeDockWidget(dock);
+        dock->hide();
+        setCentralWidget(panels);
+        header->clear();
+        header->addAction("Settings", this, [this] { panels->setCurrentIndex(0); });
+        header->addAction("Library", this, [this] { panels->setCurrentIndex(1); });
+        header->addAction("Close", this, &QWidget::close);
+        controls->hide();
+        setMinimumSize(600, 600);
+        resize(700, 850);
+    }
     if (!media->error().isEmpty())
         QMessageBox::critical(this, "Library database", media->error());
 }
@@ -248,6 +267,8 @@ Window::~Window() {
     delete exportSurface;
     exportSurface = nullptr;
     delete takeCentralWidget();
+    if (configurationOnly)
+        delete canvasStack; // Hidden configuration Canvas must die before its Library.
     player = nullptr;
     delete media;
     media = nullptr;
@@ -260,6 +281,20 @@ QWidget* Window::settingsPage() {
     auto* box = new QVBoxLayout(page);
     box->setContentsMargins(20, 10, 20, 20);
     box->setSpacing(8);
+    if (configurationOnly) {
+        box->addWidget(heading("SCREENSAVER"));
+        auto* saverMute = new QCheckBox("Mute screensaver (preview is always silent)");
+        saverMute->setObjectName("screensaverMute");
+        saverMute->setChecked(media->value("screensaverPreferences").value("muted").toBool(true));
+        connect(saverMute, &QCheckBox::toggled, this, [this](bool muted) {
+            media->setValue("screensaverPreferences", {{"muted", muted}});
+        });
+        box->addWidget(saverMute);
+        auto* shared = new QLabel("Library, presets and playback settings are shared with the player. "
+                                 "The screensaver starts with the default preset, or last-used settings.");
+        shared->setWordWrap(true);
+        box->addWidget(shared);
+    }
     box->addWidget(heading("PRESETS"));
     presets = new QComboBox;
     presets->setObjectName("presets");
@@ -310,6 +345,16 @@ QWidget* Window::settingsPage() {
     audioMode = new QComboBox;
     audioMode->addItems({"Muted", "One random video"});
     box->addWidget(audioMode);
+    if (configurationOnly) {
+        box->addWidget(new QLabel("Playback volume"));
+        auto* configVolume = new QSlider(Qt::Horizontal);
+        configVolume->setRange(0, 100);
+        configVolume->setValue(player->settings().volume);
+        box->addWidget(configVolume);
+        connect(configVolume, &QSlider::valueChanged, this, [this](int value) { volume->setValue(value); });
+        connect(player, &Canvas::settingsChanged, configVolume,
+                [this, configVolume] { configVolume->setValue(player->settings().volume); });
+    }
     box->addWidget(heading("LAYOUT & MOTION"));
     auto* layoutForm = new QFormLayout;
     layoutMin = number(1, 3600, " s");
@@ -776,6 +821,10 @@ void Window::editVideo(int row) {
         media->updateVideo(v.id, enabled->isChecked(), start->value(), end->value());
 }
 void Window::showPanel(int i) {
+    if (configurationOnly) {
+        panels->setCurrentIndex(i);
+        return;
+    }
     if (dock->isVisible() && panels->currentIndex() == i) {
         dock->hide();
         return;

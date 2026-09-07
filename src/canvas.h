@@ -15,10 +15,16 @@
 #include <vector>
 
 namespace kaleido {
+struct CanvasOptions {
+    QString shuffleKey = "shuffle";
+    bool persistSettings = true;
+    bool screensaver = false;
+    bool forceMute = false;
+};
 class Canvas : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
     Q_OBJECT
   public:
-    explicit Canvas(Library*, QWidget* parent = nullptr);
+    explicit Canvas(Library*, QWidget* parent = nullptr, CanvasOptions options = {});
     ~Canvas() override;
     void applySettings(const Settings&);
     void setAudio(bool muted, int volume);
@@ -30,6 +36,10 @@ class Canvas : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
     void nextLayout();
     void nextClips();
     void nextAudio();
+    void renderMirror(Compositor&, GLuint target, QSize pixels);
+    void mirrorReadFinished(GLsync fence) { mirrorReaders.push_back(fence); }
+    GLsync renderedFence() const { return frameFence; }
+    void enableMirrors() { mirrored = true; }
     void setExportLocked(bool locked) {
         exportLocked = locked;
     }
@@ -55,6 +65,7 @@ class Canvas : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
     void settingsChanged();
     void interaction();
     void fullscreenRequested();
+    void frameReady();
 
   protected:
     void initializeGL() override;
@@ -90,6 +101,8 @@ class Canvas : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
     void cutPreparedClips();
     void routeAudio();
     void persistShuffle();
+    void finishMirrorReads();
+    std::vector<DrawTile> drawTiles() const;
     void clearSlots();
     void warmPool(int count);
     void finishTransition();
@@ -99,6 +112,10 @@ class Canvas : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
         return clock.nsecsElapsed() / 1e9;
     }
     Library* library;
+    CanvasOptions sessionOptions;
+    bool mirrored = false;
+    GLsync frameFence = nullptr;
+    std::vector<GLsync> mirrorReaders;
     Settings config;
     MpvApi api;
     ShuffleBag bag;

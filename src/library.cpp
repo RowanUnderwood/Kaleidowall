@@ -29,6 +29,7 @@ Library::Library(const QString& path, QObject* parent) : QObject(parent) {
     connectionName = QUuid::createUuid().toString();
     db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     db.setDatabaseName(path);
+    db.setConnectOptions("QSQLITE_BUSY_TIMEOUT=1000");
     if (!db.open()) {
         dbError = db.lastError().text();
         return;
@@ -219,6 +220,10 @@ QString Library::probePath() const {
     if (QFileInfo::exists(local))
         return local;
     return QStandardPaths::findExecutable("ffprobe");
+}
+Settings Library::startupSettings() const {
+    const auto name = value("presetState").value("defaultPreset").toString();
+    return Settings::fromJson(presets().contains(name) ? value("preset:" + name) : value("settings"));
 }
 void Library::ingest(const Video& v, qint64 size, qint64 modified) {
     QSqlQuery q(db);

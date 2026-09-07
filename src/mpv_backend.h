@@ -38,7 +38,7 @@ class Decoder {
   public:
     explicit Decoder(MpvApi& a) : api(a) {}
     ~Decoder();
-    bool init(bool hwdec, int bufferMiB, mpv_opengl_init_params& gl);
+    bool init(bool hwdec, int bufferMiB, mpv_opengl_init_params& gl, bool inhibitScreensaver = true);
     bool loadFile(const QString& path, double start, double length);
     void stopPlayback();
     void handleEvent(const mpv_event& event);

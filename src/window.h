@@ -22,7 +22,7 @@ namespace kaleido {
 class Window : public QMainWindow {
     Q_OBJECT
   public:
-    explicit Window(const QString& dataDir);
+    explicit Window(const QString& dataDir, bool configurationOnly = false);
     ~Window() override;
     Canvas* canvas() const {
         return player;
@@ -86,6 +86,7 @@ class Window : public QMainWindow {
     QTimer hideTimer, statsTimer;
     QVector<Video> rows;
     bool syncing = false;
+    bool configurationOnly = false;
     // Separate from `syncing`: refreshLibrary rebuilds the folder rows and would otherwise
     // re-enter setFolderEnabled through itemChanged.
     bool rebuildingFolders = false;

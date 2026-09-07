@@ -24,6 +24,7 @@ class Library : public QObject {
     bool setValue(const QString& key, const QJsonObject&);
     QStringList presets() const;
     bool removePreset(const QString& name);
+    Settings startupSettings() const;
     void scan();
     void cancelScan();
     bool scanning() const {
