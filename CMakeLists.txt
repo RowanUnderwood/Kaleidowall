@@ -13,6 +13,15 @@ if(WIN32)
   target_link_libraries(kaleido_export PRIVATE dxgi)
 endif()
 add_executable(Kaleidowall WIN32 src/main.cpp src/window.cpp src/window.h src/window_export.cpp src/export_dialog.cpp src/export_dialog.h src/canvas.cpp src/canvas.h src/mpv_backend.cpp src/mpv_backend.h)
+qt_add_resources(Kaleidowall app_icons
+  PREFIX "/icons"
+  BASE assets
+  FILES assets/kaleidowall.ico
+)
+if(WIN32)
+  enable_language(RC)
+  target_sources(Kaleidowall PRIVATE assets/kaleidowall.rc)
+endif()
 target_include_directories(Kaleidowall PRIVATE .deps/mpv/include)
 target_link_libraries(Kaleidowall PRIVATE kaleido_export Qt6::Widgets Qt6::OpenGLWidgets Qt6::OpenGL)
 if(MSVC)

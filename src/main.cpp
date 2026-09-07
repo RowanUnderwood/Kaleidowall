@@ -3,6 +3,7 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QFile>
+#include <QIcon>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QStandardPaths>
@@ -18,6 +19,7 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName("Kaleidowall");
     QApplication::setOrganizationName("Kaleidowall");
+    QApplication::setWindowIcon(QIcon(":/icons/kaleidowall.ico"));
     QCommandLineParser args;
     args.addHelpOption();
     args.addOption({"data-dir", "Override application data directory", "path"});

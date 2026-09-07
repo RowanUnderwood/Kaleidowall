@@ -46,6 +46,14 @@ Dependencies live in `.deps/` — nothing is installed system-wide. Qt is pinned
 archive URL/SHA-256 to `dependencies.lock.json`; `scripts/dependencies.py` verifies the hash before
 extracting. Changing either means editing the lock file and re-running `setup.ps1`.
 
+## Application icon
+
+`assets/kaleidowall.svg` is the editable geometric artwork. Run `python scripts/generate_icon.py`
+(Pillow required) after artwork changes and keep the generated PNG and multi-resolution ICO in source
+control. Ordinary builds need no image tooling: CMake embeds the ICO through `assets/kaleidowall.rc`
+for Windows Explorer/shortcuts and a Qt resource for `QApplication::setWindowIcon` (window/taskbar).
+The ICO contains 16, 20, 24, 32, 40, 48, 64, 96, 128 and 256 px variants with transparency.
+
 ## Architecture
 
 `main.cpp` → `Window` (Qt Widgets chrome, dock panels, shortcuts) → `Canvas` (the single `QOpenGLWidget`

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Kaleidowall</title>
+  <desc>Six colorful mosaic facets surrounding a white play symbol on an ink tile.</desc>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#101827"/>
+  <polygon points="131,34 208,78 166,103 131,83" fill="#66D9FF"/>
+  <polygon points="212,84 212,172 170,148 170,108" fill="#5588FF"/>
+  <polygon points="208,178 131,222 131,173 166,153" fill="#A17AFF"/>
+  <polygon points="125,222 48,178 90,153 125,173" fill="#F16FA9"/>
+  <polygon points="44,172 44,84 86,108 86,148" fill="#FFBB69"/>
+  <polygon points="48,78 125,34 125,83 90,103" fill="#47DFC3"/>
+  <polygon points="131,34 208,78 166,103" fill="#8BE8FF"/>
+  <polygon points="212,84 212,172 170,148" fill="#4775E8"/>
+  <polygon points="208,178 131,222 131,173" fill="#8761E8"/>
+  <polygon points="125,222 48,178 90,153" fill="#DE5999"/>
+  <polygon points="44,172 44,84 86,108" fill="#FFD08A"/>
+  <polygon points="48,78 125,34 125,83" fill="#70EBD3"/>
+  <polygon points="114,104 114,152 154,128" fill="#F5FAFF"/>
+</svg>
