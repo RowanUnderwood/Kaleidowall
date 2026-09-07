@@ -228,7 +228,7 @@ Window::Window(const QString& dataDir) {
         if (dock->isVisible() && panels->currentIndex() == 2)
             performance->setPlainText(player->performanceText());
     });
-    refreshPresets();
+    initializePresets();
     syncSettings();
     refreshLibrary();
     if (!media->error().isEmpty())
@@ -262,30 +262,43 @@ QWidget* Window::settingsPage() {
     box->setSpacing(8);
     box->addWidget(heading("PRESETS"));
     presets = new QComboBox;
+    presets->setObjectName("presets");
     box->addWidget(presets);
-    auto* load = button("Load preset");
-    auto* save = button("Save as…");
-    box->addWidget(pair(load, save));
-    connect(load, &QPushButton::clicked, this, [this] {
-        player->applySettings(Settings::fromJson(media->value("preset:" + presets->currentText())));
-        syncSettings();
-    });
-    connect(save, &QPushButton::clicked, this, [this] {
-        bool ok = false;
-        QString name =
-            QInputDialog::getText(this, "Save preset", "Preset name", QLineEdit::Normal, {}, &ok).trimmed();
-        if (ok && !name.isEmpty()) {
-            applySettings();
-            media->setValue("preset:" + name, player->settings().json());
-            refreshPresets();
-            presets->setCurrentText(name);
-        }
-    });
+    presetLoad = button("Load");
+    presetSave = button("Save");
+    auto* saveAs = button("Save as…");
+    presetDelete = button("Delete");
+    presetDefault = button("Set default");
+    presetLoad->setObjectName("presetLoad");
+    presetSave->setObjectName("presetSave");
+    saveAs->setObjectName("presetSaveAs");
+    presetDelete->setObjectName("presetDelete");
+    presetDefault->setObjectName("presetDefault");
+    auto* saveRow = new QHBoxLayout;
+    for (auto* b : {presetLoad, presetSave, saveAs})
+        saveRow->addWidget(b);
+    box->addLayout(saveRow);
+    auto* manageRow = new QHBoxLayout;
+    manageRow->addWidget(presetDelete);
+    manageRow->addWidget(presetDefault);
+    box->addLayout(manageRow);
+    presetInfo = new QLabel;
+    presetInfo->setObjectName("muted");
+    presetInfo->setWordWrap(true);
+    box->addWidget(presetInfo);
+    connect(presets, &QComboBox::currentIndexChanged, this, &Window::updatePresetActions);
+    connect(presetLoad, &QPushButton::clicked, this, [this] { loadPreset(presets->currentData().toString()); });
+    connect(presetSave, &QPushButton::clicked, this, [this] { savePreset(false); });
+    connect(saveAs, &QPushButton::clicked, this, [this] { savePreset(true); });
+    connect(presetDelete, &QPushButton::clicked, this, &Window::deletePreset);
+    connect(presetDefault, &QPushButton::clicked, this, &Window::setDefaultPreset);
     box->addWidget(heading("PLAYBACK"));
     auto* form = new QFormLayout;
     form->setSpacing(10);
     minSlots = integer(1, 32);
     maxSlots = integer(1, 32);
+    minSlots->setObjectName("minSlots");
+    maxSlots->setObjectName("maxSlots");
     form->addRow("Active videos", pair(minSlots, maxSlots));
     clipMin = number(.5, 3600, " s");
     clipMax = number(.5, 3600, " s");
@@ -325,9 +338,15 @@ QWidget* Window::settingsPage() {
     note->setObjectName("muted");
     box->addWidget(note);
     auto* modes = new QFormLayout;
-    for (const auto& name : QStringList{"Split", "Grid", "Hero", "Masonry", "Circles", "Hexagons"}) {
+    for (const auto& name : QStringList{"Split", "Grid", "Hero", "Masonry", "Circles", "Hexagons", "Honeycomb", "Inset"}) {
         auto* weight = integer(0, 10);
         modeWeights[name] = weight;
+        if (name == "Honeycomb")
+            weight->setToolTip("Centered, edge-to-edge hexagons for 3 or more videos; otherwise uses Hexagons.");
+        if (name == "Inset")
+            weight->setToolTip("One full-screen background video plus random Circles, Hexagons or Honeycomb. "
+                               "The background counts toward the total and always fills the screen; "
+                               "Crop / Fit applies to the foreground.");
         modes->addRow(name, weight);
     }
     box->addLayout(modes);
@@ -525,7 +544,7 @@ void Window::applySettings() {
     statusLabel->setText("Settings saved. Existing eligible clips finish their current ranges; new "
                          "selections use these exclusions.");
 }
-void Window::refreshPresets() {
+void Window::initializePresets() {
     if (media->presets().empty()) {
         Settings s;
         media->setValue("preset:Balanced mosaic", s.json());
@@ -550,8 +569,118 @@ void Window::refreshPresets() {
         s.layoutMax = 90;
         media->setValue("preset:Calm", s.json());
     }
+    const auto state = media->value("presetState");
+    const auto names = media->presets();
+    loadedPreset = state.value("loadedPreset").toString();
+    if (!names.contains(loadedPreset))
+        loadedPreset.clear();
+    refreshPresets();
+    const auto defaultName = state.value("defaultPreset").toString();
+    if (names.contains(defaultName))
+        loadPreset(defaultName);
+    else if (!loadedPreset.isEmpty())
+        presets->setCurrentIndex(presets->findData(loadedPreset));
+}
+void Window::refreshPresets() {
+    const auto selected = presets->currentData().toString();
+    const auto defaultName = media->value("presetState").value("defaultPreset").toString();
     presets->clear();
-    presets->addItems(media->presets());
+    for (const auto& name : media->presets())
+        presets->addItem(name + (name == defaultName ? " (default)" : ""), name);
+    const int index = presets->findData(selected);
+    if (index >= 0)
+        presets->setCurrentIndex(index);
+    updatePresetActions();
+}
+void Window::updatePresetActions() {
+    const bool selected = presets->currentIndex() >= 0;
+    presetLoad->setEnabled(selected);
+    presetSave->setEnabled(selected);
+    presetDelete->setEnabled(selected);
+    const auto defaultName = media->value("presetState").value("defaultPreset").toString();
+    presetDefault->setEnabled(selected && presets->currentData().toString() != defaultName);
+    presetInfo->setText("Loaded: " + (loadedPreset.isEmpty() ? "Last-used settings" : loadedPreset) +
+                        "\nStartup: " + (defaultName.isEmpty() ? "Last-used settings" : defaultName));
+}
+void Window::loadPreset(const QString& name) {
+    if (!media->presets().contains(name))
+        return;
+    player->applySettings(Settings::fromJson(media->value("preset:" + name)));
+    loadedPreset = name;
+    auto state = media->value("presetState");
+    state["loadedPreset"] = name;
+    media->setValue("presetState", state);
+    presets->setCurrentIndex(presets->findData(name));
+    syncSettings();
+    updatePresetActions();
+}
+void Window::savePreset(bool saveAs) {
+    QString name = presets->currentData().toString();
+    if (saveAs) {
+        bool ok = false;
+        name = QInputDialog::getText(this, "Save preset as", "Preset name", QLineEdit::Normal, {}, &ok).trimmed();
+        if (!ok || name.isEmpty())
+            return;
+    } else if (name.isEmpty()) {
+        return;
+    }
+    if (media->presets().contains(name) &&
+        QMessageBox::question(this, "Replace preset", "Replace preset \"" + name +
+                              "\" with the settings currently shown? These settings will also be applied.",
+                              QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes)
+        return;
+    applySettings();
+    if (!media->setValue("preset:" + name, player->settings().json())) {
+        QMessageBox::critical(this, "Save preset", media->error());
+        return;
+    }
+    loadedPreset = name;
+    auto state = media->value("presetState");
+    state["loadedPreset"] = name;
+    media->setValue("presetState", state);
+    refreshPresets();
+    presets->setCurrentIndex(presets->findData(name));
+}
+void Window::deletePreset() {
+    const auto name = presets->currentData().toString();
+    const auto names = media->presets();
+    if (!names.contains(name))
+        return;
+    if (names.size() <= 1) {
+        QMessageBox::information(this, "Cannot delete preset", "At least one preset must remain.");
+        return;
+    }
+    const int index = names.indexOf(name);
+    const auto replacement = names[index + 1 < names.size() ? index + 1 : index - 1];
+    const bool deletingLoaded = loadedPreset == name;
+    QString message = "Delete preset \"" + name + "\"?";
+    if (deletingLoaded)
+        message += "\nPreset \"" + replacement + "\" will be loaded, replacing the current settings and any unapplied edits.";
+    if (media->value("presetState").value("defaultPreset").toString() == name)
+        message += "\nThe startup default will be cleared; startup will restore last-used settings.";
+    if (QMessageBox::question(this, "Delete preset", message, QMessageBox::Yes | QMessageBox::Cancel,
+                              QMessageBox::Cancel) != QMessageBox::Yes)
+        return;
+    if (!media->removePreset(name)) {
+        QMessageBox::critical(this, "Delete preset", media->error());
+        return;
+    }
+    refreshPresets();
+    presets->setCurrentIndex(presets->findData(replacement));
+    if (deletingLoaded)
+        loadPreset(replacement);
+}
+void Window::setDefaultPreset() {
+    const auto name = presets->currentData().toString();
+    if (!media->presets().contains(name))
+        return;
+    auto state = media->value("presetState");
+    state["defaultPreset"] = name;
+    if (!media->setValue("presetState", state)) {
+        QMessageBox::critical(this, "Set default preset", media->error());
+        return;
+    }
+    refreshPresets();
 }
 void Window::refreshLibrary() {
     auto folders = media->folders();

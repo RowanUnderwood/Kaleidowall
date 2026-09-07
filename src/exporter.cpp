@@ -723,7 +723,8 @@ void ExportWorker::run() {
                     }
                     tiles.push_back(
                         {stream.texture, stream.reader->size, interpolateRect(slot.from, slot.target, p),
-                         float(slot.opacityFrom * (1 - p) + slot.opacityTarget * p), stream.chroma});
+                         float(slot.opacityFrom * (1 - p) + slot.opacityTarget * p), stream.chroma,
+                         &slot == &timeline.segments().front()});
                 }
             decodeMs += stage.nsecsElapsed() / 1e6;
             stage.restart();

@@ -257,8 +257,9 @@ void Canvas::nextLayout() {
         emit status(QString("Using %1 players: only %2 eligible videos.").arg(cap).arg(videos.size()));
     fromMask = targetMask;
     mode = pickMode(config, rng, mode);
-    targetMask = count == 1 ? 0 : maskKind(mode);
-    auto layout = makeLayout(mode, count, double(width()) / std::max(1, height()), rng);
+    layoutMode = resolveLayoutMode(mode, count, rng);
+    targetMask = count == 1 && mode != "Inset" ? 0 : maskKind(layoutMode);
+    auto layout = makeLayout(layoutMode, count, double(width()) / std::max(1, height()), rng);
     for (auto& s : players) {
         s->from = s->target;
         s->opacityFrom = 1;
@@ -610,6 +611,17 @@ void Canvas::scheduleTick() {
     timer.setInterval(std::chrono::nanoseconds(qint64(std::ceil((nextTickAt - now) * 1e9))));
     timer.start();
 }
+void Canvas::resizeGL(int w, int h) {
+    if (!layoutMode.endsWith("Honeycomb") || w <= 0 || h <= 0)
+        return;
+    const int count = int(std::count_if(players.begin(), players.end(),
+                                        [](const auto& s) { return !s->retiring; }));
+    const auto layout = makeLayout(layoutMode, count, double(w) / h, rng);
+    int i = 0;
+    for (auto& s : players)
+        if (!s->retiring)
+            s->target = layout[i++];
+}
 void Canvas::paintGL() {
     if (!initialized)
         return;
@@ -655,7 +667,8 @@ void Canvas::paintGL() {
         if (s->fbo && s->hasFrame)
             tiles.push_back({s->fbo->texture(),
                              QSize(std::max(1, s->displayWidth), std::max(1, s->displayHeight)),
-                             rectangle(*s), float(s->opacityFrom * (1 - t) + s->opacityTarget * t)});
+                             rectangle(*s), float(s->opacityFrom * (1 - t) + s->opacityTarget * t),
+                             0, s.get() == players.front().get()});
     if (available)
         compositor.draw(defaultFramebufferObject(), QSize(w, h), size(), background, config.crop, fromMask,
                         targetMask, float(t), tiles);

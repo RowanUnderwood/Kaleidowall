@@ -6,7 +6,9 @@
 
 namespace kaleido {
 int maskKind(const QString& mode) {
-    return mode == "Circles" ? 1 : mode == "Hexagons" ? 2 : 0;
+    if (mode.startsWith("Inset "))
+        return 3 + maskKind(mode.mid(6));
+    return mode == "Circles" ? 1 : mode == "Hexagons" ? 2 : mode == "Honeycomb" ? 3 : 0;
 }
 double easedProgress(double time, double start, double duration) {
     const double t = duration <= 0 ? 1 : std::clamp((time - start) / duration, 0.0, 1.0);
@@ -30,10 +32,11 @@ bool Compositor::initialize() {
         uniform int yuv;
         uniform vec2 videoSize,viewSize;
         uniform vec3 backgroundColor;
-        uniform float alpha,maskProgress;
+        uniform float alpha,maskProgress,backgroundProgress,transparentBars;
         uniform int crop,oldMask,newMask;
         float shape(int kind,vec2 p){
             if(kind==0)return max(abs(p.x),abs(p.y))-.5;
+            if(kind==3){vec2 q=abs(p*vec2(1.154700538,1.));return max(q.y,dot(q,vec2(.866025404,.5)))-.5;}
             vec2 q=(p*viewSize)/min(viewSize.x,viewSize.y);
             if(kind==1)return length(q)-.485;
             q=abs(q);return max(q.y,dot(q,vec2(.8660254,.5)))-.465;
@@ -42,11 +45,16 @@ bool Compositor::initialize() {
             vec2 p=uv-.5;
             float d=mix(shape(oldMask,p),shape(newMask,p),maskProgress);
             float edge=1.-smoothstep(-.002,.002,d);
+            // A hard shared edge avoids background seams from two translucent fringes.
+            if((newMask==3&&maskProgress>=1.)||(oldMask==3&&maskProgress<=0.))edge=d<=0.?1.:0.;
+            edge=mix(edge,1.,backgroundProgress);
             if(edge<=0.)discard;
             float va=videoSize.x/videoSize.y,da=viewSize.x/viewSize.y;
             vec2 scale=vec2(1.);
-            if(crop==1){if(va>da)scale.x=da/va;else scale.y=va/da;}
-            else {if(va>da)scale.y=va/da;else scale.x=da/va;}
+            vec2 fillScale=vec2(1.),fitScale=vec2(1.);
+            if(va>da){fillScale.x=da/va;fitScale.y=va/da;}
+            else {fillScale.y=va/da;fitScale.x=da/va;}
+            scale=mix(crop==1?fillScale:fitScale,fillScale,backgroundProgress);
             vec2 t=p*scale+.5;
             vec3 rgb=texture(frame,t).rgb;
             if(yuv==1){
@@ -54,7 +62,9 @@ bool Compositor::initialize() {
                 vec2 c=(texture(chroma,t).rg*255.-128.)/224.;
                 rgb=vec3(y+1.5748*c.y,y-.187324*c.x-.468124*c.y,y+1.8556*c.x);
             }
-            if(any(lessThan(t,vec2(0.)))||any(greaterThan(t,vec2(1.))))rgb=backgroundColor;
+            if(any(lessThan(t,vec2(0.)))||any(greaterThan(t,vec2(1.)))){
+                rgb=backgroundColor;edge*=1.-transparentBars;
+            }
             color=vec4(rgb,alpha*edge);
         }
     )";
@@ -91,8 +101,6 @@ void Compositor::draw(GLuint target, QSize pixels, QSize logicalSize, const QCol
     program.bind();
     program.setUniformValue("backgroundColor",
                             QVector3D(background.redF(), background.greenF(), background.blueF()));
-    program.setUniformValue("oldMask", oldMask);
-    program.setUniformValue("newMask", newMask);
     program.setUniformValue("maskProgress", progress);
     program.setUniformValue("crop", crop ? 1 : 0);
     program.setUniformValue("frame", 0);
@@ -102,9 +110,22 @@ void Compositor::draw(GLuint target, QSize pixels, QSize logicalSize, const QCol
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glActiveTexture(GL_TEXTURE0);
     for (const auto& tile : tiles) {
+        const bool oldInset = oldMask >= 4, newInset = newMask >= 4;
+        const bool oldBackground = oldInset && tile.firstSlot;
+        const bool newBackground = newInset && tile.firstSlot;
+        const int oldShape = oldBackground ? 0 : oldInset ? oldMask - 3 : oldMask;
+        const int newShape = newBackground ? 0 : newInset ? newMask - 3 : newMask;
+        program.setUniformValue("oldMask", oldShape);
+        program.setUniformValue("newMask", newShape);
+        program.setUniformValue("backgroundProgress",
+                                float(oldBackground * (1 - progress) + newBackground * progress));
+        program.setUniformValue("transparentBars", tile.firstSlot ? 0.f :
+                                float(oldInset * (1 - progress) + newInset * progress));
         QRectF r = tile.rect;
-        r.adjust(2.0 / logicalSize.width(), 2.0 / logicalSize.height(), -2.0 / logicalSize.width(),
-                 -2.0 / logicalSize.height());
+        const double inset = 2 * ((oldShape == 3 || oldBackground ? 0 : 1) * (1 - progress) +
+                                  (newShape == 3 || newBackground ? 0 : 1) * progress);
+        r.adjust(inset / logicalSize.width(), inset / logicalSize.height(), -inset / logicalSize.width(),
+                 -inset / logicalSize.height());
         if (r.width() <= 0 || r.height() <= 0)
             continue;
         program.setUniformValue("rect",

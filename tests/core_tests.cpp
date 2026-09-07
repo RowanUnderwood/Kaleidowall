@@ -168,14 +168,83 @@ class CoreTests : public QObject {
                 QVERIFY(std::abs(area - 1) < 1e-9);
             }
     }
+    void honeycombIsCenteredConnectedAndDoesNotOverlap() {
+        std::mt19937 rng(4);
+        for (double aspect : {0.3, 9. / 16, 1., 16. / 9, 3.5}) {
+            for (int n = 3; n <= 32; ++n) {
+                const auto rects = makeLayout("Honeycomb", n, aspect, rng);
+                QCOMPARE(rects.size(), n);
+                QRectF bounds;
+                QVector<QPointF> centers;
+                for (const auto& r : rects) {
+                    QVERIFY(r.left() >= -1e-9 && r.top() >= -1e-9);
+                    QVERIFY(r.right() <= 1 + 1e-9 && r.bottom() <= 1 + 1e-9);
+                    QVERIFY(std::abs(r.width() * aspect / r.height() - 2 / std::sqrt(3.)) < 1e-9);
+                    QVERIFY(std::abs(r.height() - rects[0].height()) < 1e-9);
+                    bounds = bounds.united(r);
+                    centers << QPointF(r.center().x() * aspect, r.center().y());
+                }
+                QVERIFY(std::abs(bounds.center().x() - .5) < 1e-9);
+                QVERIFY(std::abs(bounds.center().y() - .5) < 1e-9);
+                const double spacing = rects[0].height();
+                QVector<QVector<int>> neighbors(n);
+                for (int i = 0; i < n; ++i)
+                    for (int j = 0; j < i; ++j) {
+                        const auto d = centers[i] - centers[j];
+                        // Separating-axis test on the three hexagon edge normals.
+                        const double separation = std::max({std::abs(d.y()),
+                            std::abs(std::sqrt(3.) / 2 * d.x() + .5 * d.y()),
+                            std::abs(std::sqrt(3.) / 2 * d.x() - .5 * d.y())});
+                        QVERIFY(separation >= spacing - 1e-9);
+                        if (std::abs(std::hypot(d.x(), d.y()) - spacing) < 1e-9) {
+                            neighbors[i] << j;
+                            neighbors[j] << i;
+                        }
+                    }
+                QSet<int> reached{0};
+                QVector<int> pending{0};
+                while (!pending.empty())
+                    for (int j : neighbors[pending.takeLast()])
+                        if (!reached.contains(j)) {
+                            reached.insert(j);
+                            pending << j;
+                        }
+                QCOMPARE(reached.size(), n);
+            }
+        }
+        for (int n = 0; n <= 2; ++n)
+            QCOMPARE(makeLayout("Honeycomb", n, 16. / 9, rng), makeLayout("Hexagons", n, 16. / 9, rng));
+    }
+    void insetResolvesEligibleShapesAndCountsBackground() {
+        std::mt19937 rng(28);
+        for (int count = 1; count <= 32; ++count) {
+            QSet<QString> seen;
+            for (int trial = 0; trial < 90; ++trial) {
+                const auto mode = resolveLayoutMode("Inset", count, rng);
+                seen.insert(mode);
+                QVERIFY(mode == "Inset Circles" || mode == "Inset Hexagons" ||
+                        (count >= 4 && mode == "Inset Honeycomb"));
+                const auto rects = makeLayout(mode, count, 16. / 9, rng);
+                QCOMPARE(rects.size(), count);
+                QCOMPARE(rects.front(), QRectF(0, 0, 1, 1));
+                QCOMPARE(rects.mid(1), makeLayout(mode.mid(6), count - 1, 16. / 9, rng));
+            }
+            QCOMPARE(seen.size(), count >= 4 ? 3 : 2);
+        }
+        Settings s;
+        s.modes = {"Inset"};
+        s.weights = {{"Inset", 5}, {"Circles", 0}, {"Hexagons", 0}, {"Honeycomb", 0}};
+        QCOMPARE(Settings::fromJson(s.json()).json(), s.json());
+        QCOMPARE(pickMode(s, rng), QString("Inset"));
+    }
     void settingsRoundTrip() {
         Settings s;
         s.minSlots = 1;
         s.maxSlots = 12;
         s.skipPercent = true;
         s.skipStart = 12;
-        s.modes = {"Hero", "Masonry"};
-        s.weights = {{"Hero", 4}, {"Masonry", 2}};
+        s.modes = {"Hero", "Masonry", "Honeycomb"};
+        s.weights = {{"Hero", 4}, {"Masonry", 2}, {"Honeycomb", 3}};
         s.backgroundColor = "#123456";
         QCOMPARE(Settings::fromJson(s.json()).json(), s.json());
     }

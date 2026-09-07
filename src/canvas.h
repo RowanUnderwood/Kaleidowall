@@ -58,6 +58,7 @@ class Canvas : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
 
   protected:
     void initializeGL() override;
+    void resizeGL(int width, int height) override;
     void paintGL() override;
     void mouseMoveEvent(QMouseEvent*) override;
     void mouseDoubleClickEvent(QMouseEvent*) override;
@@ -113,7 +114,7 @@ class Canvas : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
     int frames = 0, nextSerial = 1, audioSerial = -1, fromMask = 0, targetMask = 0;
     bool initialized = false, available = false, running = false, paused = false;
     bool exportLocked = false;
-    QString mode = "Grid", rendererName, lastError;
+    QString mode = "Grid", layoutMode = "Grid", rendererName, lastError;
     Compositor compositor;
     bool profiling = false;
     QJsonArray profileEvents;

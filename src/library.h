@@ -21,8 +21,9 @@ class Library : public QObject {
     QVector<Video> videos() const;
     void updateVideo(const QString& id, bool enabled, double start, double end);
     QJsonObject value(const QString& key) const;
-    void setValue(const QString& key, const QJsonObject&);
+    bool setValue(const QString& key, const QJsonObject&);
     QStringList presets() const;
+    bool removePreset(const QString& name);
     void scan();
     void cancelScan();
     bool scanning() const {

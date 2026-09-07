@@ -43,3 +43,12 @@ if(MSVC)
   target_compile_options(kaleido_export_tests PRIVATE /W4 /utf-8)
 endif()
 add_test(NAME kaleido_export COMMAND kaleido_export_tests)
+
+add_executable(kaleido_preset_tests tests/preset_tests.cpp src/window.cpp src/window_export.cpp
+  src/export_dialog.cpp src/canvas.cpp src/mpv_backend.cpp)
+target_include_directories(kaleido_preset_tests PRIVATE src .deps/mpv/include)
+target_link_libraries(kaleido_preset_tests PRIVATE kaleido_export Qt6::Widgets Qt6::OpenGLWidgets Qt6::Test)
+if(MSVC)
+  target_compile_options(kaleido_preset_tests PRIVATE /W4 /utf-8)
+endif()
+add_test(NAME kaleido_presets COMMAND kaleido_preset_tests)

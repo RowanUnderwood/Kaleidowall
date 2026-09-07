@@ -7,6 +7,10 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
+#include <QOffscreenSurface>
+#include <QOpenGLContext>
+#include <QOpenGLFramebufferObject>
+#include <QOpenGLTexture>
 #include <QProcess>
 #include <QPushButton>
 #include <QTemporaryDir>
@@ -31,6 +35,94 @@ class ExportTests : public QObject {
         return media;
     }
   private slots:
+    void insetKeepsCountDistinctClipsAndAudioAcrossTransitions() {
+        for (int count = 1; count <= 8; ++count) {
+            Settings s;
+            s.modes = {"Inset", "Grid"};
+            s.minSlots = s.maxSlots = count;
+            s.clipMin = s.clipMax = .5;
+            s.layoutMin = s.layoutMax = 1;
+            s.transition = .3;
+            ExportTimeline scene(s, fixtures(), 42, 16. / 9);
+            bool sawInset = false, sawGrid = false;
+            for (int frame = 0; frame < 150; ++frame) {
+                scene.advance(frame / 30.);
+                QCOMPARE(scene.segments().size(), size_t(count));
+                QSet<QString> occupied;
+                for (const auto& slot : scene.segments()) {
+                    QVERIFY(slot.stream > 0);
+                    QVERIFY(!occupied.contains(slot.video.id));
+                    occupied.insert(slot.video.id);
+                }
+                if (scene.newMask >= 4) {
+                    sawInset = true;
+                    QVERIFY(scene.newMask <= (count >= 4 ? 6 : 5));
+                    QCOMPARE(scene.segments().front().target, QRectF(0, 0, 1, 1));
+                } else {
+                    sawGrid = true;
+                }
+                if (const auto* audio = scene.audioSlot())
+                    QVERIFY(occupied.contains(audio->video.id));
+            }
+            QVERIFY(sawInset && sawGrid);
+        }
+    }
+    void insetCompositorFillsBackgroundAndRevealsItThroughFit() {
+        QSurfaceFormat format;
+        format.setVersion(3, 3);
+        format.setProfile(QSurfaceFormat::CoreProfile);
+        QOpenGLContext context;
+        context.setFormat(format);
+        QVERIFY(context.create());
+        QOffscreenSurface surface;
+        surface.setFormat(context.format());
+        surface.create();
+        QVERIFY(context.makeCurrent(&surface));
+        Compositor compositor;
+        QVERIFY2(compositor.initialize(), qPrintable(compositor.error()));
+        QImage red(16, 64, QImage::Format_RGBA8888), green(64, 16, QImage::Format_RGBA8888);
+        red.fill(Qt::red);
+        green.fill(Qt::green);
+        QOpenGLTexture background(red), foreground(green);
+        QOpenGLFramebufferObject target(QSize(400, 300));
+        QVERIFY(target.isValid());
+        std::vector<DrawTile> tiles = {
+            {background.textureId(), red.size(), QRectF(0, 0, 1, 1), 1, 0, true},
+            {foreground.textureId(), green.size(), QRectF(0, 0, 1, 1), 1, 0, false}};
+        for (const auto& shape : {QString("Inset Circles"), QString("Inset Hexagons")}) {
+            const int mask = maskKind(shape);
+            for (bool crop : {false, true}) {
+                compositor.draw(target.handle(), target.size(), target.size(), Qt::blue, crop,
+                                0, mask, 1, tiles);
+                const auto result = target.toImage();
+                QCOMPARE(result.pixelColor(0, 0), QColor(Qt::red));
+                QCOMPARE(result.pixelColor(399, 299), QColor(Qt::red));
+                QCOMPARE(result.pixelColor(200, 150), QColor(Qt::green));
+                QCOMPARE(result.pixelColor(200, 60), QColor(crop ? Qt::green : Qt::red));
+            }
+        }
+        // A foreground frame arriving before the background must retain its shaped mask.
+        tiles.erase(tiles.begin());
+        compositor.draw(target.handle(), target.size(), target.size(), Qt::blue, false,
+                        0, maskKind("Inset Circles"), 1, tiles);
+        QCOMPARE(target.toImage().pixelColor(0, 0), QColor(Qt::blue));
+        compositor.release();
+    }
+    void honeycombUsesSharedGeometryAndSmallCountFallback() {
+        for (int count = 1; count <= 8; ++count) {
+            Settings s;
+            s.modes = {"Honeycomb"};
+            s.minSlots = s.maxSlots = count;
+            ExportTimeline scene(s, fixtures(), 42, 16. / 9);
+            scene.advance(0);
+            QCOMPARE(scene.newMask, count == 1 ? 0 : maskKind(count == 2 ? "Hexagons" : "Honeycomb"));
+            std::mt19937 rng(1);
+            const auto expected = makeLayout("Honeycomb", count, 16. / 9, rng);
+            QCOMPARE(scene.segments().size(), size_t(count));
+            for (int i = 0; i < count; ++i)
+                QCOMPARE(scene.segments()[i].target, expected[i]);
+        }
+    }
     void roundsOnlyUpToWholeFrames() {
         ExportOptions o;
         o.duration = 1.001;

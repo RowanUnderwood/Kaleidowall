@@ -163,12 +163,48 @@ QJsonObject Library::value(const QString& key) const {
         return QJsonDocument::fromJson(q.value(0).toByteArray()).object();
     return {};
 }
-void Library::setValue(const QString& key, const QJsonObject& value) {
+bool Library::setValue(const QString& key, const QJsonObject& value) {
     QSqlQuery q(db);
     q.prepare("INSERT OR REPLACE INTO kv VALUES(?,?)");
     q.addBindValue(key);
     q.addBindValue(QString::fromUtf8(QJsonDocument(value).toJson(QJsonDocument::Compact)));
-    q.exec();
+    if (q.exec())
+        return true;
+    dbError = q.lastError().text();
+    return false;
+}
+bool Library::removePreset(const QString& name) {
+    if (!db.transaction()) {
+        dbError = db.lastError().text();
+        return false;
+    }
+    const auto names = presets();
+    if (!names.contains(name) || names.size() <= 1) {
+        dbError = names.size() <= 1 ? "At least one preset must remain." : "Preset no longer exists.";
+        db.rollback();
+        return false;
+    }
+    QSqlQuery q(db);
+    q.prepare("DELETE FROM kv WHERE key=?");
+    q.addBindValue("preset:" + name);
+    if (!q.exec()) {
+        dbError = q.lastError().text();
+        db.rollback();
+        return false;
+    }
+    auto state = value("presetState");
+    for (const auto& key : {"defaultPreset", "loadedPreset"})
+        if (state.value(key).toString() == name)
+            state.remove(key);
+    if (!setValue("presetState", state)) {
+        db.rollback();
+        return false;
+    }
+    if (db.commit())
+        return true;
+    dbError = db.lastError().text();
+    db.rollback();
+    return false;
 }
 QStringList Library::presets() const {
     QSqlQuery q(db);

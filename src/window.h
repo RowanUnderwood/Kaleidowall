@@ -51,6 +51,12 @@ class Window : public QMainWindow {
     void refreshLibrary();
     void editVideo(int row);
     void refreshPresets();
+    void initializePresets();
+    void loadPreset(const QString& name);
+    void savePreset(bool saveAs);
+    void deletePreset();
+    void setDefaultPreset();
+    void updatePresetActions();
     void revealControls();
     void showExportDialog();
     Library* media;
@@ -64,6 +70,9 @@ class Window : public QMainWindow {
     QSlider* volume;
     QLabel* statusLabel;
     QComboBox *presets, *audioMode;
+    QPushButton *presetLoad, *presetSave, *presetDelete, *presetDefault;
+    QLabel* presetInfo;
+    QString loadedPreset;
     QSpinBox *minSlots, *maxSlots, *fps, *buffer, *texture;
     QDoubleSpinBox *clipMin, *clipMax, *layoutMin, *layoutMax, *transition, *skipStart, *skipEnd;
     QCheckBox *percent, *reduced, *duplicates, *crop, *hwdec;

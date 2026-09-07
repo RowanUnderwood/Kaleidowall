@@ -86,6 +86,13 @@ that owns all playback) → `Decoder`/`MpvApi` (libmpv) and `Library` (SQLite + 
 - **`src/window.*`** — toolbars, the right-hand dock with three stacked panels (0 settings, 1 library,
   2 performance — `showPanel(int)` uses those indices), presets, per-video editing, fullscreen
   auto-hiding controls.
+  Preset identity uses combo item data, not its decorated display text. `presetState` in `kv` stores
+  `loadedPreset` separately from `defaultPreset`; selection alone never loads a preset. Startup applies
+  the saved default, otherwise retains last-used settings and their loaded-preset association.
+  Save/Save as apply visible edits after overwrite confirmation. `Library::removePreset` transactionally
+  refuses the last deletion and clears matching metadata; Window loads the next/previous preset only
+  when deleting the loaded one. Starter presets are seeded only during window initialization when empty.
+  `kaleido_presets` tests actual buttons/dialogs, deletion fallback, last-preset protection, and restart behavior.
 
 ### Canvas invariants
 
@@ -112,6 +119,18 @@ that owns all playback) → `Decoder`/`MpvApi` (libmpv) and `Library` (SQLite + 
 - **Masks and fit happen in the shared fragment shader** in `compositor.cpp` (rect/circle/hexagon SDFs blended by
   `maskProgress`, crop-vs-fit scaling, background colour outside the video rect). Layout geometry comes
   from `makeLayout`; the shader never picks positions.
+- **Honeycomb** uses equal flat-top hexagons on a staggered lattice, fit and centered as a whole by
+  `makeLayout`. Its bounding rectangles intentionally overlap; the hexagon interiors do not. Mask 3
+  fills these bounds without the ordinary two-pixel tile inset, using hard shared edges to prevent
+  alpha-blended background seams. Playback and export fall back to Hexagons below three slots.
+  `Canvas::resizeGL` refits Honeycomb targets so hexagons remain regular after resizing.
+- **Inset** resolves once per layout change through `resolveLayoutMode` to Inset Circles/Hexagons/
+  Honeycomb (mask codes 4/5/6). Selection is uniform among eligible shapes, independent of weights;
+  Honeycomb needs at least four total slots. Slot zero is the full-screen background and counts toward
+  the pool limit. `DrawTile::firstSlot` identifies it even when earlier textures are not ready; never
+  infer its identity from the submitted draw-list index. Render it first, rectangular, without inset,
+  crop-to-fill. Foreground Fit bars become transparent. The compositor blends these properties during
+  transitions using the old/new mask codes. Both layers use ordinary clip/shuffle/audio scheduling.
 
 ### Diagnostics and headless modes
 

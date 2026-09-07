@@ -16,7 +16,7 @@ struct Settings {
          hwdec = true;
     int volume = 65, fps = 60, bufferMiB = 64, textureLimit = 1920;
     QString backgroundColor = "#06080c";
-    QStringList modes = {"Split", "Grid", "Hero", "Masonry", "Circles", "Hexagons"};
+    QStringList modes = {"Split", "Grid", "Hero", "Masonry", "Circles", "Hexagons", "Honeycomb", "Inset"};
     QJsonObject weights;
     void normalize();
     QJsonObject json() const;
@@ -65,6 +65,8 @@ class ShuffleBag {
     int cycleNumber = 1;
 };
 QVector<QRectF> makeLayout(const QString& mode, int count, double aspect, std::mt19937&);
+// Resolve once per layout change, then reuse for geometry, masks and window resizing.
+QString resolveLayoutMode(const QString& mode, int count, std::mt19937&);
 QString pickMode(const Settings&, std::mt19937&, const QString& previous = {});
 double randomRange(std::mt19937&, double low, double high);
 } // namespace kaleido

@@ -16,6 +16,7 @@ struct DrawTile {
     QRectF rect;
     float opacity = 1;
     GLuint chromaTexture = 0; // Nonzero: texture is limited-range BT.709 NV12 luma.
+    bool firstSlot = false; // Stable first slot becomes the background in Inset modes.
 };
 // Context-owned; initialize, draw and release with its GL context current.
 class Compositor : protected QOpenGLFunctions_3_3_Core {

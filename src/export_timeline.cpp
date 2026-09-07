@@ -52,8 +52,9 @@ void ExportTimeline::layout() {
     const int count = std::uniform_int_distribution<int>(std::min(config.minSlots, cap), cap)(rng);
     oldMask = newMask;
     mode = pickMode(config, rng, mode);
-    newMask = count == 1 ? 0 : maskKind(mode);
-    const auto rects = makeLayout(mode, count, aspect, rng);
+    const auto resolved = resolveLayoutMode(mode, count, rng);
+    newMask = count == 1 && mode != "Inset" ? 0 : maskKind(resolved);
+    const auto rects = makeLayout(resolved, count, aspect, rng);
     for (auto& slot : active) {
         slot.from = slot.target;
         slot.opacityFrom = 1;
